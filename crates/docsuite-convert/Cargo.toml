@@ -8,6 +8,7 @@ authors.workspace = true
 
 [dependencies]
 docsuite-core = { path = "../docsuite-core" }
+docsuite-ocr = { path = "../docsuite-ocr" }
 docsuite-pdf = { path = "../docsuite-pdf" }
 image = { workspace = true }
 lopdf = { workspace = true }

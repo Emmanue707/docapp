@@ -33,6 +33,8 @@ pub struct TextRun {
     pub color: RgbColor,
     pub char_spacing: f64,
     pub hidden: bool,
+    pub confidence: f32,
+    pub highlight: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -58,6 +60,7 @@ pub struct PlacedImage {
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    pub behind: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

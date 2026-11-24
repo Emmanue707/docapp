@@ -6,8 +6,12 @@ extern crate lopdf;
 mod docx;
 mod extract;
 mod fonts;
+mod image_ocr;
 mod matrix;
 mod obfuscate;
+mod ocr_util;
+mod page_ocr;
+mod pdf_text;
 mod pdf_word;
 mod types;
 
@@ -19,12 +23,29 @@ use std::sync::Arc;
 use docsuite_core::{CancelToken, Error, ProgressSink, Result};
 use docsuite_pdf::{ImagePageFit, PageRanges, pdf_from_image_file};
 
+pub use image_ocr::{ImageOcrOptions, image_to_docx, image_to_searchable_pdf, image_to_txt};
+pub use pdf_text::{PdfTextOptions, pdf_to_searchable_pdf, pdf_to_txt};
 pub use pdf_word::pdf_to_docx;
 pub use types::{ExtractedPage, TextRun};
 
 pub trait PageOcr: Send + Sync {
-    fn ocr_page(&self, image: &[u8], width: u32, height: u32) -> Result<Vec<TextRun>>;
+    fn ocr_page(
+        &self,
+        image: &[u8],
+        width: u32,
+        height: u32,
+        cancel: &CancelToken,
+    ) -> Result<Vec<TextRun>>;
+
+    fn ocr_placed(&self, img: &types::PlacedImage, cancel: &CancelToken) -> Result<Vec<TextRun>> {
+        let w = img.width.max(1.0) as u32;
+        let h = img.height.max(1.0) as u32;
+        self.ocr_page(&img.bytes, w, h, cancel)
+    }
 }
+
+pub use ocr_util::{MAX_OCR_LONG_SIDE, cap_long_side, decode_image_gray, lines_plain_text};
+pub use page_ocr::RecognizerPageOcr;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PdfToWordMode {
@@ -38,6 +59,7 @@ pub struct PdfToWordOptions {
     pub mode: PdfToWordMode,
     pub embed_fonts: bool,
     pub ocr_scanned: bool,
+    pub highlight_low_confidence: bool,
     pub pages: Option<PageRanges>,
     pub page_ocr: Option<Arc<dyn PageOcr>>,
 }
@@ -49,6 +71,8 @@ pub enum Format {
     Odt,
     Jpeg,
     Png,
+    Txt,
+    WebP,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -72,6 +96,9 @@ fn sniff_format(bytes: &[u8]) -> Option<Format> {
     if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
         return Some(Format::Png);
     }
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return Some(Format::WebP);
+    }
     if bytes.starts_with(b"PK\x03\x04") {
         return None;
     }
@@ -90,6 +117,8 @@ fn format_from_extension(path: &Path) -> Option<Format> {
         Some("odt") => Some(Format::Odt),
         Some("jpg") | Some("jpeg") => Some(Format::Jpeg),
         Some("png") => Some(Format::Png),
+        Some("webp") => Some(Format::WebP),
+        Some("txt") => Some(Format::Txt),
         _ => None,
     }
 }
@@ -191,12 +220,48 @@ pub fn convert(
 ) -> Result<()> {
     let input_fmt = detect_format(input)?;
     let output_fmt = format_for_output(output)?;
+    let txt_opts = PdfTextOptions {
+        pages: opts.pdf_to_word.pages.clone(),
+        ocr: opts.pdf_to_word.ocr_scanned,
+        page_ocr: opts.pdf_to_word.page_ocr.clone(),
+    };
+    let img_ocr = opts.pdf_to_word.page_ocr.clone();
     match (input_fmt, output_fmt) {
-        (Format::Jpeg | Format::Png, Format::Pdf) => {
-            image_to_pdf(input, output, &opts.image, cancel, progress)
+        (Format::Jpeg | Format::Png | Format::WebP, Format::Pdf) => {
+            if opts.pdf_to_word.ocr_scanned {
+                let ocr = img_ocr.ok_or_else(|| Error::Ocr("ocr not configured".to_owned()))?;
+                image_to_searchable_pdf(input, output, ocr.as_ref(), cancel, progress)
+            } else {
+                image_to_pdf(input, output, &opts.image, cancel, progress)
+            }
+        }
+        (Format::Jpeg | Format::Png | Format::WebP, Format::Docx) => {
+            let ocr = img_ocr.ok_or_else(|| Error::Ocr("ocr not configured".to_owned()))?;
+            image_to_docx(
+                input,
+                output,
+                &ImageOcrOptions {
+                    mode: opts.pdf_to_word.mode,
+                    ocr,
+                },
+                cancel,
+                progress,
+            )
+        }
+        (Format::Jpeg | Format::Png | Format::WebP, Format::Txt) => {
+            let ocr = img_ocr.ok_or_else(|| Error::Ocr("ocr not configured".to_owned()))?;
+            image_to_txt(input, output, ocr.as_ref(), cancel, progress)
         }
         (Format::Pdf, Format::Docx) => {
             pdf_to_docx(input, output, &opts.pdf_to_word, cancel, progress)
+        }
+        (Format::Pdf, Format::Txt) => pdf_to_txt(input, output, &txt_opts, cancel, progress),
+        (Format::Pdf, Format::Pdf) => {
+            if opts.pdf_to_word.ocr_scanned {
+                pdf_to_searchable_pdf(input, output, &txt_opts, cancel, progress)
+            } else {
+                Err(Error::Unsupported("pdf to pdf needs --ocr".to_owned()))
+            }
         }
         (Format::Odt, Format::Docx) => odt_to_docx(input, output, cancel, progress),
         (Format::Docx, Format::Odt) => docx_to_odt(input, output, cancel, progress),
@@ -251,3 +316,7 @@ mod tests {
 #[cfg(test)]
 #[path = "pdf_docx_tests.rs"]
 mod pdf_docx_tests;
+
+#[cfg(test)]
+#[path = "ocr_tests.rs"]
+mod ocr_tests;

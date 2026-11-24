@@ -551,6 +551,8 @@ fn show_string(ctx: &mut ExtractCtx, gs: &mut GfxState, bytes: &[u8], x_offset: 
             color,
             char_spacing: gs.char_space,
             hidden,
+            confidence: 1.0,
+            highlight: false,
         });
         let mut adv = w_em / 1000.0 * hz + gs.char_space;
         let is_space = !font.is_cid_font() && glyph.first() == Some(&32);
@@ -629,6 +631,7 @@ fn handle_xobject(
                 y: ty,
                 width: (max_x - min_x).abs(),
                 height: (max_y - min_y).abs(),
+                behind: false,
             });
         }
     } else if subtype == "Form" {

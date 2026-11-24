@@ -7,6 +7,7 @@ use docsuite_pdf::Pdf;
 use crate::PdfToWordOptions;
 use crate::docx::write_docx;
 use crate::extract::{collect_fonts, extract_page};
+use crate::ocr_util::apply_ocr_to_scanned_page;
 use crate::types::ExtractedPage;
 
 pub fn pdf_to_docx(
@@ -36,11 +37,16 @@ pub fn pdf_to_docx(
             docsuite_core::Progress::stage_static(i as u64, page_list.len() as u64, "pdf-to-docx"),
         );
         let page_id = pdf.page_id(pn)?;
-        let extracted = extract_page(doc, page_id)?;
+        let mut extracted = extract_page(doc, page_id)?;
         let scanned = is_scanned(&extracted);
         if scanned && opts.ocr_scanned {
-            if let Some(ocr) = &opts.page_ocr {
-                let _ = ocr;
+            let ocr = opts
+                .page_ocr
+                .as_ref()
+                .ok_or_else(|| Error::Ocr("ocr not configured".to_owned()))?;
+            if let Some(img) = extracted.images.first() {
+                let runs = ocr.ocr_placed(img, cancel)?;
+                apply_ocr_to_scanned_page(&mut extracted, runs, true);
             }
         }
         pages.push(extracted);
@@ -67,7 +73,7 @@ pub fn pdf_to_docx(
     Ok(())
 }
 
-fn is_scanned(page: &ExtractedPage) -> bool {
+pub fn is_scanned(page: &ExtractedPage) -> bool {
     if !page.text.is_empty() {
         return false;
     }

@@ -256,6 +256,11 @@ fn run_xml(run: &TextRun) -> String {
     let color = run.color.hex();
     let b = if run.bold { r#"<w:b/>"# } else { "" };
     let i = if run.italic { r#"<w:i/>"# } else { "" };
+    let hi = if run.highlight {
+        r#"<w:highlight w:val="yellow"/>"#
+    } else {
+        ""
+    };
     let family = escape_xml(&run.font_family);
     let text = escape_xml(&run.text);
     let preserve = if run.text.starts_with(' ') || run.text.ends_with(' ') {
@@ -264,7 +269,7 @@ fn run_xml(run: &TextRun) -> String {
         ""
     };
     format!(
-        r#"<w:r><w:rPr><w:rFonts w:ascii="{family}" w:hAnsi="{family}"/><w:sz w:val="{sz}"/><w:color w:val="{color}"/>{b}{i}</w:rPr><w:t{preserve}>{text}</w:t></w:r>"#
+        r#"<w:r><w:rPr><w:rFonts w:ascii="{family}" w:hAnsi="{family}"/><w:sz w:val="{sz}"/><w:color w:val="{color}"/>{b}{i}{hi}</w:rPr><w:t{preserve}>{text}</w:t></w:r>"#
     )
 }
 
@@ -320,9 +325,10 @@ fn image_anchor(img: &PlacedImage, pi: usize, ii: usize, ids: &mut DocPrGen, z: 
     let h = pt_to_emu(img.height);
     let rid = format!("rIdImg{pi}_{ii}");
     let doc_id = ids.alloc();
+    let behind = if img.behind { "1" } else { "0" };
     format!(
         r#"<w:p>{ANCHOR_P_PR}<w:r><w:drawing>
-<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="{z}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">
+<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="{z}" behindDoc="{behind}" locked="0" layoutInCell="1" allowOverlap="1">
 <wp:simplePos x="0" y="0"/>
 <wp:positionH relativeFrom="page"><wp:posOffset>{x}</wp:posOffset></wp:positionH>
 <wp:positionV relativeFrom="page"><wp:posOffset>{y}</wp:posOffset></wp:positionV>
