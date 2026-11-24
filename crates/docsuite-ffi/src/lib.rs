@@ -1,6 +1,8 @@
 use std::ffi::c_char;
 use std::path::Path;
 
+#[cfg(feature = "ocrs")]
+use docsuite_convert::{PdfTextOptions, RecognizerPageOcr, pdf_to_searchable_pdf};
 use docsuite_convert::{PdfToWordMode, PdfToWordOptions, pdf_to_docx};
 use docsuite_core::Error;
 use docsuite_ocr::{FieldType, predict_type};
@@ -141,6 +143,44 @@ pub fn ffi_pdf_to_docx(path: String, out: String, editable: bool) -> Result<(), 
         ..PdfToWordOptions::default()
     };
     pdf_to_docx(Path::new(&path), Path::new(&out), &opts, &cancel, &None)?;
+    Ok(())
+}
+
+#[cfg(feature = "ocrs")]
+#[uniffi::export]
+pub fn ocr_image(path: String, models_dir: String) -> Result<String, DocsuiteError> {
+    use docsuite_convert::image_to_txt;
+    use docsuite_ocr::OcrsRecognizer;
+    let cancel = docsuite_core::CancelToken::new();
+    let rec = OcrsRecognizer::with_dir(Path::new(&models_dir))?;
+    let ocr = RecognizerPageOcr {
+        recognizer: std::sync::Arc::new(rec),
+        highlight_low_confidence: false,
+    };
+    let tmp = std::env::temp_dir().join(format!("docsuite-ocr-{}.txt", std::process::id()));
+    image_to_txt(Path::new(&path), &tmp, &ocr, &cancel, &None)?;
+    let text = std::fs::read_to_string(&tmp).map_err(|e| DocsuiteError::Io {
+        message: e.to_string(),
+    })?;
+    let _ = std::fs::remove_file(&tmp);
+    Ok(text)
+}
+
+#[cfg(feature = "ocrs")]
+#[uniffi::export]
+pub fn make_searchable(path: String, out: String, models_dir: String) -> Result<(), DocsuiteError> {
+    let cancel = docsuite_core::CancelToken::new();
+    let rec = OcrsRecognizer::with_dir(Path::new(&models_dir))?;
+    let ocr = std::sync::Arc::new(RecognizerPageOcr {
+        recognizer: std::sync::Arc::new(rec),
+        highlight_low_confidence: false,
+    });
+    let opts = PdfTextOptions {
+        pages: None,
+        ocr: true,
+        page_ocr: Some(ocr),
+    };
+    pdf_to_searchable_pdf(Path::new(&path), Path::new(&out), &opts, &cancel, &None)?;
     Ok(())
 }
 
