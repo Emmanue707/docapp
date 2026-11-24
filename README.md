@@ -13,7 +13,7 @@ Local-first document toolkit: a small Rust engine for PDF work on desktop and An
 | Printed OCR (ocrs) | Planned |
 | Handwriting models | Planned (optional download) |
 | Word/ODT → PDF (Typst) | Planned |
-| PDF → Word (exact-look & editable) | Planned |
+| PDF → Word (exact-look & editable) | Done |
 
 ## Architecture
 
@@ -56,8 +56,10 @@ cargo build --release -p docsuite-cli
 
 ```bash
 ./target/release/docapp info sample.pdf
-./target/release/docapp split in.pdf --ranges 1-3 --ranges 4- -o parts/   # one file per --ranges
+./target/release/docapp split in.pdf --ranges 1-3,5 -o parts/   # one file per comma group
+./target/release/docapp split in.pdf --ranges 1-3,5 --single -o all.pdf
 ./target/release/docapp convert scan.png -o scan.pdf
+./target/release/docapp convert in.pdf -o out.docx --mode exact --pages 1-3
 ./target/release/docapp detect-type "ek@example.com"
 ```
 
