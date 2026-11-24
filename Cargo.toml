@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/desktop"]
+default-members = [
+    "crates/docsuite-core",
+    "crates/docsuite-viewer",
+    "crates/docsuite-ocr",
+    "crates/docsuite-pdf",
+    "crates/docsuite-convert",
+    "crates/docsuite-cli",
+    "crates/docsuite-ffi",
+]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Emmanue707/docapp"
+authors = ["Emmanuel Kokele"]
+
+[workspace.dependencies]
+thiserror = { version = "2", default-features = false }
+anyhow = { version = "1", default-features = false }
+clap = { version = "4", default-features = false, features = ["derive", "std"] }
+eframe = { version = "0.31", default-features = false, features = [
+    "glow",
+    "wayland",
+    "x11",
+] }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.release-fast]
+inherits = "release"
+opt-level = 3
