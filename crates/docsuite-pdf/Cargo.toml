@@ -10,6 +10,21 @@ authors.workspace = true
 docsuite-core = { path = "../docsuite-core" }
 lopdf = { workspace = true }
 image = { workspace = true }
+cms = { workspace = true }
+der = { workspace = true }
+x509-cert = { workspace = true }
+rsa = { workspace = true }
+p256 = { workspace = true }
+pkcs8 = { workspace = true }
+pkcs12 = { workspace = true }
+spki = { workspace = true }
+signature = { workspace = true }
+const-oid = { workspace = true }
+sha2 = { workspace = true }
+time = { workspace = true }
+ecdsa = { workspace = true }
+elliptic-curve = { workspace = true }
+rcgen = { workspace = true }
 
 [dev-dependencies]
 flate2 = "1.1"

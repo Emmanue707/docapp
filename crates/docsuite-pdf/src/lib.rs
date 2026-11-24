@@ -2,11 +2,17 @@
 extern crate lopdf;
 
 mod annotate;
+mod cert_new;
+mod cms_builder;
 mod crop;
+mod digital_sign;
 mod image_pdf;
 mod info;
+mod keystore;
 mod lopdf_map;
 mod merge;
+mod openssl_cms;
+mod p12_loader;
 pub mod page_attr;
 mod pdf;
 mod progress;
@@ -16,23 +22,36 @@ mod reorder;
 mod resources;
 mod rotate;
 mod searchable;
+mod sign_options;
 mod signature;
 mod split;
 #[cfg(test)]
 mod testutil;
+mod verify_sig;
 
 pub use annotate::{Rgb, TextAnnotationMode, add_image, add_text, add_text_annotation};
+pub use cert_new::{
+    CertKeyType, GeneratedCert, NewCertParams, generate_self_signed, write_cert_output,
+};
+pub use cms_builder::PdfSubFilter;
 pub use crop::{PdfRect, crop};
+pub use digital_sign::{sign_pdf_incremental, sign_pdf_path};
 pub use image_pdf::{ImagePageFit, pdf_from_image_bytes, pdf_from_image_file};
 pub use info::{PageSize, PdfInfo, pdf_info};
+pub use keystore::{
+    SigningIdentity, SigningKeyMaterial, identity_from_generated, load_identity_from_p12,
+    load_identity_from_pem, load_identity_from_pem_bytes,
+};
 pub use merge::merge;
 pub use pdf::Pdf;
 pub use ranges::PageRanges;
 pub use reorder::{delete_pages, extract_pages, reorder};
 pub use rotate::{normalize_degrees, rotate};
 pub use searchable::{PlacedWord, add_searchable_text_layer};
+pub use sign_options::DigitalSignOptions;
 pub use signature::{SignatureStamp, Signer, sign_pdf, visible_signature};
 pub use split::{split, split_every};
+pub use verify_sig::{SignatureReport, verify_pdf_bytes};
 
 #[cfg(test)]
 mod tests {
@@ -196,6 +215,85 @@ mod tests {
     fn signature_placeholder() {
         let mut pdf = minimal_pdf(1, None);
         sign_pdf(&mut pdf, "Sig1", &DummySigner).unwrap();
+    }
+
+    fn identity_for(key_type: crate::CertKeyType) -> crate::SigningIdentity {
+        let params = crate::NewCertParams {
+            common_name: "Test Signer".to_owned(),
+            email: Some("test@example.com".to_owned()),
+            key_type,
+        };
+        let generated = crate::generate_self_signed(&params).unwrap();
+        crate::identity_from_generated(&generated).unwrap()
+    }
+
+    fn sign_opts_minimal() -> crate::DigitalSignOptions {
+        crate::DigitalSignOptions {
+            field_name: "Sig1".to_owned(),
+            sub_filter: crate::PdfSubFilter::Pades,
+            reason: Some("test".to_owned()),
+            location: None,
+            contact: None,
+            visible: None,
+        }
+    }
+
+    #[test]
+    fn digital_sign_p256_and_rsa() {
+        let cancel = CancelToken::new();
+        for key in [crate::CertKeyType::P256, crate::CertKeyType::Rsa3072] {
+            let mut pdf = minimal_pdf(1, None);
+            let bytes = pdf.to_bytes().unwrap();
+            let identity = identity_for(key);
+            let signed = crate::sign_pdf_incremental(
+                &bytes,
+                &identity,
+                &sign_opts_minimal(),
+                &cancel,
+                &None,
+            )
+            .unwrap();
+            let reports = crate::verify_pdf_bytes(&signed).unwrap();
+            assert_eq!(reports.len(), 1);
+            assert!(reports[0].digest_ok);
+            assert!(reports[0].covers_document);
+        }
+    }
+
+    #[test]
+    fn digital_sign_tamper_fails_digest() {
+        let cancel = CancelToken::new();
+        let mut pdf = minimal_pdf(1, None);
+        let bytes = pdf.to_bytes().unwrap();
+        let identity = identity_for(crate::CertKeyType::Rsa3072);
+        let mut signed =
+            crate::sign_pdf_incremental(&bytes, &identity, &sign_opts_minimal(), &cancel, &None)
+                .unwrap();
+        if let Some(i) = signed.iter().position(|&b| b == b'1') {
+            signed[i] ^= 0x10;
+        }
+        let reports = crate::verify_pdf_bytes(&signed).unwrap();
+        assert!(!reports.is_empty());
+        assert!(!reports[0].digest_ok);
+    }
+
+    #[test]
+    fn digital_sign_twice() {
+        let cancel = CancelToken::new();
+        let mut pdf = minimal_pdf(1, None);
+        let bytes = pdf.to_bytes().unwrap();
+        let identity = identity_for(crate::CertKeyType::Rsa3072);
+        let once =
+            crate::sign_pdf_incremental(&bytes, &identity, &sign_opts_minimal(), &cancel, &None)
+                .unwrap();
+        let mut opts2 = sign_opts_minimal();
+        opts2.field_name = "Sig2".to_owned();
+        let twice = crate::sign_pdf_incremental(&once, &identity, &opts2, &cancel, &None).unwrap();
+        let reports_once = crate::verify_pdf_bytes(&once).unwrap();
+        assert_eq!(reports_once.len(), 1);
+        assert!(reports_once[0].digest_ok);
+        assert!(reports_once[0].covers_document);
+        let _ = twice;
     }
 
     #[test]

@@ -34,7 +34,44 @@ eframe = { version = "0.31", default-features = false, features = [
 ocrs = { version = "0.14", default-features = false, features = ["onnx"] }
 rten = { version = "0.28", default-features = false, features = ["onnx_format"] }
 rten-imageproc = { version = "0.28", default-features = false }
-sha2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.11", default-features = false }
+cms = { version = "0.3.0-rc.2", default-features = false, features = [
+    "std",
+    "builder",
+    "digest",
+] }
+der = { version = "0.8", default-features = false, features = ["alloc", "oid", "std", "derive"] }
+x509-cert = { version = "0.3.1", default-features = false, features = [
+    "builder",
+    "std",
+    "pem",
+] }
+rsa = { version = "0.10", default-features = false, features = ["encoding", "std", "getrandom", "pkcs1v15"] }
+p256 = { version = "0.14", default-features = false, features = [
+    "ecdsa",
+    "pem",
+    "pkcs8",
+] }
+pkcs8 = { version = "0.11", default-features = false, features = [
+    "pem",
+    "std",
+    "pkcs5",
+] }
+pkcs12 = { version = "0.2.0-rc.0", default-features = false, features = [
+    "pem",
+    "kdf",
+    "zeroize",
+] }
+spki = { version = "0.8", default-features = false, features = ["std"] }
+signature = { version = "3", default-features = false, features = ["digest", "alloc"] }
+const-oid = { version = "0.10", default-features = false }
+rand_core = { version = "0.9", default-features = false, features = ["os_rng"] }
+time = { version = "0.3", default-features = false, features = ["formatting", "parsing"] }
+rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
+ecdsa = { version = "0.17", default-features = false, features = ["pem", "pkcs8", "digest"] }
+elliptic-curve = { version = "0.14", default-features = false, features = ["pkcs8"] }
+rcgen = { version = "0.14", default-features = false, features = ["pem", "crypto", "aws_lc_rs"] }
+getrandom = { version = "0.3", default-features = false, features = ["std"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }

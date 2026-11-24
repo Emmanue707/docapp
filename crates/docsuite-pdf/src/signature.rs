@@ -2,27 +2,99 @@
 
 use docsuite_core::{CancelToken, Error, ProgressSink, Result, ThrottleState};
 use lopdf::content::{Content, Operation};
-use lopdf::{Object, StringFormat};
+use lopdf::{Dictionary, Object, StringFormat};
 
 use crate::crop::PdfRect;
 use crate::lopdf_map::map_err;
 use crate::pdf::Pdf;
 use crate::progress::step;
+use crate::sign_options::DigitalSignOptions;
 
-pub struct SignatureStamp {
-    pub name: String,
-    pub reason: String,
-    pub date: String,
-    pub image: Option<Vec<u8>>,
-}
+pub use crate::sign_options::SignatureStamp;
 
 pub trait Signer {
     fn sign(&self, digest_input: &[u8]) -> Result<Vec<u8>>;
     fn certificate_chain(&self) -> Vec<Vec<u8>>;
 }
 
-const SIGNATURE_RAW_BYTES: usize = 4096;
+const SIGNATURE_RAW_BYTES: usize = 24_576;
 const BYTE_RANGE_SLOT: i64 = 1_000_000_000;
+
+pub struct SignaturePlaceholder {
+    pub field_ref: lopdf::ObjectId,
+    #[allow(dead_code)]
+    pub field_dict: Dictionary,
+    pub objects: Vec<(lopdf::ObjectId, Object)>,
+}
+
+impl SignaturePlaceholder {
+    #[allow(dead_code)]
+    pub fn widget_dict(&self, page_id: lopdf::ObjectId, rect: PdfRect) -> Dictionary {
+        let mut widget = self.field_dict.clone();
+        widget.set("Type", Object::Name(b"Annot".to_vec()));
+        widget.set("Subtype", Object::Name(b"Widget".to_vec()));
+        widget.set(
+            "Rect",
+            vec![
+                Object::Real(rect.llx as f32),
+                Object::Real(rect.lly as f32),
+                Object::Real(rect.urx as f32),
+                Object::Real(rect.ury as f32),
+            ],
+        );
+        widget.set("P", Object::Reference(page_id));
+        widget.set("FT", Object::Name(b"Sig".to_vec()));
+        widget
+    }
+}
+
+pub fn prepare_signature_placeholder(
+    field_name: &str,
+    sub_filter: &str,
+    m_date: &str,
+    opts: &DigitalSignOptions,
+) -> Result<SignaturePlaceholder> {
+    let placeholder: Vec<u8> = vec![0; SIGNATURE_RAW_BYTES];
+    let mut sig_dict = dictionary! {
+        "Type" => "Sig",
+        "Filter" => "Adobe.PPKLite",
+        "SubFilter" => sub_filter,
+        "ByteRange" => vec![
+            Object::Integer(BYTE_RANGE_SLOT),
+            Object::Integer(BYTE_RANGE_SLOT),
+            Object::Integer(BYTE_RANGE_SLOT),
+            Object::Integer(BYTE_RANGE_SLOT),
+        ],
+        "Contents" => Object::String(placeholder, StringFormat::Hexadecimal),
+        "M" => Object::string_literal(m_date),
+    };
+    if let Some(reason) = &opts.reason {
+        sig_dict.set("Reason", Object::string_literal(reason.as_bytes().to_vec()));
+    }
+    if let Some(location) = &opts.location {
+        sig_dict.set(
+            "Location",
+            Object::string_literal(location.as_bytes().to_vec()),
+        );
+    }
+    if let Some(name) = &opts.contact {
+        sig_dict.set(
+            "ContactInfo",
+            Object::string_literal(name.as_bytes().to_vec()),
+        );
+    }
+    let mut field_dict = dictionary! {
+        "FT" => "Sig",
+        "T" => Object::string_literal(field_name.as_bytes().to_vec()),
+        "V" => Object::Null,
+    };
+    field_dict.set("V", Object::Null);
+    Ok(SignaturePlaceholder {
+        field_ref: (0, 0),
+        field_dict,
+        objects: vec![((0, 0), Object::Dictionary(sig_dict))],
+    })
+}
 
 pub fn visible_signature(
     pdf: &mut Pdf,
@@ -82,53 +154,61 @@ pub fn visible_signature(
 }
 
 pub fn sign_pdf(pdf: &mut Pdf, field_name: &str, signer: &dyn Signer) -> Result<Vec<u8>> {
-    let placeholder: Vec<u8> = vec![0; SIGNATURE_RAW_BYTES];
-    let sig_id = pdf.document_mut().add_object(dictionary! {
-        "Type" => "Sig",
-        "Filter" => "Adobe.PPKLite",
-        "SubFilter" => "adbe.pkcs7.detached",
-        "ByteRange" => vec![
-            Object::Integer(BYTE_RANGE_SLOT),
-            Object::Integer(BYTE_RANGE_SLOT),
-            Object::Integer(BYTE_RANGE_SLOT),
-            Object::Integer(BYTE_RANGE_SLOT),
-        ],
-        "Contents" => Object::String(placeholder, StringFormat::Hexadecimal),
-    });
-
+    let sub_filter = "adbe.pkcs7.detached";
+    let m_date = format!("D:{}+00'00'", "00000000000000");
+    let opts = DigitalSignOptions {
+        field_name: field_name.to_owned(),
+        sub_filter: crate::cms_builder::PdfSubFilter::AdbePkcs7,
+        reason: None,
+        location: None,
+        contact: None,
+        visible: None,
+    };
+    let mut prepared = prepare_signature_placeholder(field_name, sub_filter, &m_date, &opts)?;
+    let sig_dict = match &prepared.objects[0].1 {
+        Object::Dictionary(d) => d.clone(),
+        _ => return Err(Error::Pdf("sig placeholder".into())),
+    };
+    let sig_id = pdf.document_mut().add_object(sig_dict);
+    prepared.field_ref = sig_id;
     let form = dictionary! {
         "Fields" => vec![Object::Dictionary(dictionary! {
             "FT" => "Sig",
-            "T" => Object::string_literal(field_name),
+            "T" => Object::string_literal(field_name.as_bytes().to_vec()),
             "V" => sig_id,
         })],
     };
     let form_id = pdf.document_mut().add_object(form);
     let catalog = pdf.document_mut().catalog_mut().map_err(map_err)?;
     catalog.set("AcroForm", form_id);
-
     let mut bytes = pdf.to_bytes()?;
-    let contents = find_contents_hex(&bytes)?;
+    finalize_signature_bytes(&mut bytes, signer)
+}
+
+pub fn finalize_signature_bytes(bytes: &mut Vec<u8>, signer: &dyn Signer) -> Result<Vec<u8>> {
+    let contents = find_contents_hex(bytes)?;
     let byte_range = build_byte_range(contents, bytes.len());
-    patch_byte_range(&mut bytes, &byte_range)?;
-    let digest_input = build_digest_input(&bytes, contents)?;
+    patch_byte_range(bytes, &byte_range)?;
+    let digest_input = build_digest_input(bytes, contents)?;
     let signature = signer.sign(&digest_input)?;
     if signature.len() > SIGNATURE_RAW_BYTES {
         return Err(Error::Unsupported("signature blob too large".to_owned()));
     }
     let hex = encode_hex(&signature)?;
-    patch_contents_hex(&mut bytes, contents, &hex)?;
-    Ok(bytes)
+    patch_contents_hex(bytes, contents, &hex)?;
+    Ok(bytes.clone())
 }
 
 pub(crate) fn find_contents_hex(bytes: &[u8]) -> Result<(usize, usize)> {
     let key = b"/Contents";
     let mut search = 0usize;
+    let mut last = None;
     while let Some(rel) = bytes[search..]
         .windows(key.len())
         .position(|window| window == key)
     {
         let pos = search + rel;
+        let prior = &bytes[pos.saturating_sub(4096)..pos];
         let mut i = pos + key.len();
         while i < bytes.len() && bytes[i].is_ascii_whitespace() {
             i += 1;
@@ -141,14 +221,19 @@ pub(crate) fn find_contents_hex(bytes: &[u8]) -> Result<(usize, usize)> {
                 .ok_or_else(|| Error::Pdf("signature Contents not terminated".to_owned()))?
                 + open
                 + 1;
-            return Ok((open, close + 1));
+            if prior
+                .windows(b"/SubFilter".len())
+                .any(|w| w == b"/SubFilter")
+            {
+                last = Some((open, close + 1));
+            }
         }
         search = pos + 1;
     }
-    Err(Error::Pdf("signature Contents not found".to_owned()))
+    last.ok_or_else(|| Error::Pdf("signature Contents not found".to_owned()))
 }
 
-fn build_byte_range(contents: (usize, usize), total: usize) -> [usize; 4] {
+pub(crate) fn build_byte_range(contents: (usize, usize), total: usize) -> [usize; 4] {
     [0, contents.0, contents.1, total.saturating_sub(contents.1)]
 }
 
