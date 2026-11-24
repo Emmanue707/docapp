@@ -61,6 +61,12 @@ impl ThrottleState {
     }
 }
 
+impl Default for ThrottleState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub(crate) struct SharedThrottle {
     inner: Mutex<ThrottleState>,
 }

@@ -6,7 +6,7 @@ mod progress;
 pub use cancel::CancelToken;
 pub use error::{Error, Result};
 pub use job::{JobCtx, JobHandle, JobRunner, Priority};
-pub use progress::{Progress, ProgressSink, throttle_progress};
+pub use progress::{Progress, ProgressSink, ThrottleState, throttle_progress};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
