@@ -61,6 +61,7 @@ pub struct PlacedImage {
     pub width: f64,
     pub height: f64,
     pub behind: bool,
+    pub orient_fallback: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -90,9 +91,26 @@ pub struct ExtractedPage {
     pub width: f64,
     pub height: f64,
     pub rotate: i32,
+    pub source_rotate: i32,
+    pub crop_box: [f64; 4],
     pub text: Vec<TextLine>,
     pub images: Vec<PlacedImage>,
     pub vectors: Vec<VectorPath>,
+}
+
+impl ExtractedPage {
+    pub fn empty_a4() -> Self {
+        Self {
+            width: 595.0,
+            height: 842.0,
+            rotate: 0,
+            source_rotate: 0,
+            crop_box: [0.0, 0.0, 595.0, 842.0],
+            text: Vec::new(),
+            images: Vec::new(),
+            vectors: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
