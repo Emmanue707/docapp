@@ -74,7 +74,7 @@ pub fn verify_file(path: &Path, expected_hex: &str) -> Result<()> {
         hasher.update(&buf[..n]);
     }
     let digest = hasher.finalize();
-    let hex = format!("{digest:x}");
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
     if hex != expected_hex {
         return Err(Error::Ocr(format!(
             "sha256 mismatch for {} (expected {}, got {})",

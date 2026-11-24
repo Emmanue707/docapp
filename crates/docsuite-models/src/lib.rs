@@ -62,7 +62,8 @@ mod fetch {
         }
         file.sync_all().context("sync model")?;
         drop(file);
-        let hex = format!("{:x}", hasher.finalize());
+        let digest = hasher.finalize();
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
         if hex != sha {
             let _ = fs::remove_file(&tmp);
             bail!("sha256 mismatch for {name}");
