@@ -21,6 +21,8 @@ authors = ["Emmanuel Kokele"]
 [workspace.dependencies]
 thiserror = { version = "2", default-features = false }
 anyhow = { version = "1", default-features = false }
+lopdf = { version = "0.47", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 clap = { version = "4", default-features = false, features = ["derive", "std"] }
 eframe = { version = "0.31", default-features = false, features = [
     "glow",
