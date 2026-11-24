@@ -14,7 +14,7 @@ path = "src/main.rs"
 docsuite-core = { path = "../../crates/docsuite-core" }
 docsuite-viewer = { path = "../../crates/docsuite-viewer", features = ["pdfium"] }
 docsuite-pdf = { path = "../../crates/docsuite-pdf" }
-docsuite-convert = { path = "../../crates/docsuite-convert", features = ["pdfium"] }
+docsuite-convert = { path = "../../crates/docsuite-convert", features = ["pdfium", "typst"] }
 docsuite-ocr = { path = "../../crates/docsuite-ocr", features = ["ocrs"] }
 docsuite-models = { path = "../../crates/docsuite-models", features = ["download"] }
 eframe.workspace = true

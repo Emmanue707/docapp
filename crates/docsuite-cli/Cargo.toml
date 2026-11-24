@@ -11,8 +11,9 @@ name = "docapp"
 path = "src/main.rs"
 
 [features]
-default = ["pdfium"]
+default = ["pdfium", "typst"]
 pdfium = ["docsuite-convert/pdfium"]
+typst = ["docsuite-convert/typst"]
 
 [dependencies]
 docsuite-core = { path = "../docsuite-core" }
