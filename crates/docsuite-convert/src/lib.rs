@@ -17,7 +17,9 @@ mod ocr_util;
 mod odt_read;
 mod odt_write;
 mod ooxf;
+mod orient;
 mod page_ocr;
+mod page_rotate;
 #[cfg(feature = "pdfium")]
 mod pdf_image;
 mod pdf_text;
