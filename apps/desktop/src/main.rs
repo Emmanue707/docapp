@@ -1,9 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod home;
 mod icon;
+mod modal;
+mod parse_util;
 mod recent;
+mod sidebar;
 mod state;
+mod theme;
+mod tools;
+mod viewer_util;
 
 use app::DocApp;
 use eframe::egui;
@@ -13,6 +20,7 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Waghitech Docapp")
+            .with_inner_size([1100.0, 720.0])
             .with_icon(icon),
         ..Default::default()
     };
@@ -20,22 +28,15 @@ fn main() -> eframe::Result<()> {
         "Waghitech Docapp",
         options,
         Box::new(|cc| {
-            setup_theme(cc);
+            let dark = cc.egui_ctx.style().visuals.dark_mode;
+            if std::env::var("DOCAPP_DARK").ok().as_deref() == Some("1") {
+                theme::apply_visuals(&cc.egui_ctx, true);
+            } else if std::env::var("DOCAPP_DARK").ok().as_deref() == Some("0") {
+                theme::apply_visuals(&cc.egui_ctx, false);
+            } else {
+                theme::apply_visuals(&cc.egui_ctx, dark);
+            }
             Ok(Box::new(DocApp::default()))
         }),
     )
-}
-
-fn setup_theme(cc: &eframe::CreationContext<'_>) {
-    let dark = cc.egui_ctx.style().visuals.dark_mode;
-    cc.egui_ctx.set_visuals(if dark {
-        egui::Visuals::dark()
-    } else {
-        egui::Visuals::light()
-    });
-    if std::env::var("DOCAPP_DARK").ok().as_deref() == Some("1") {
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
-    } else if std::env::var("DOCAPP_DARK").ok().as_deref() == Some("0") {
-        cc.egui_ctx.set_visuals(egui::Visuals::light());
-    }
 }
