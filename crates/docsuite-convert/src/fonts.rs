@@ -1,0 +1,488 @@
+use std::collections::HashMap;
+
+use docsuite_core::{Error, Result};
+use lopdf::{Dictionary, Document, Object, ObjectId};
+
+use crate::types::FontEmbed;
+
+const WIN_ANSI: [u16; 256] = build_win_ansi();
+
+const fn build_win_ansi() -> [u16; 256] {
+    let mut t = [0u16; 256];
+    let mut i = 0usize;
+    while i < 256 {
+        t[i] = i as u16;
+        i += 1;
+    }
+    t[0x80] = 0x20AC;
+    t[0x82] = 0x201A;
+    t[0x83] = 0x0192;
+    t[0x84] = 0x201E;
+    t[0x85] = 0x2026;
+    t[0x86] = 0x2020;
+    t[0x87] = 0x2021;
+    t[0x88] = 0x02C6;
+    t[0x89] = 0x2030;
+    t[0x8A] = 0x0160;
+    t[0x8B] = 0x2039;
+    t[0x8C] = 0x0152;
+    t[0x8E] = 0x017D;
+    t[0x91] = 0x2018;
+    t[0x92] = 0x2019;
+    t[0x93] = 0x201C;
+    t[0x94] = 0x201D;
+    t[0x95] = 0x2022;
+    t[0x96] = 0x2013;
+    t[0x97] = 0x2014;
+    t[0x98] = 0x02DC;
+    t[0x99] = 0x2122;
+    t[0x9A] = 0x0161;
+    t[0x9B] = 0x203A;
+    t[0x9C] = 0x0153;
+    t[0x9E] = 0x017E;
+    t[0x9F] = 0x0178;
+    t
+}
+
+static GLYPH_TO_UNICODE: &[(&str, char)] = &[
+    ("space", ' '),
+    ("A", 'A'),
+    ("B", 'B'),
+    ("C", 'C'),
+    ("D", 'D'),
+    ("E", 'E'),
+    ("F", 'F'),
+    ("G", 'G'),
+    ("H", 'H'),
+    ("I", 'I'),
+    ("J", 'J'),
+    ("K", 'K'),
+    ("L", 'L'),
+    ("M", 'M'),
+    ("N", 'N'),
+    ("O", 'O'),
+    ("P", 'P'),
+    ("Q", 'Q'),
+    ("R", 'R'),
+    ("S", 'S'),
+    ("T", 'T'),
+    ("U", 'U'),
+    ("V", 'V'),
+    ("W", 'W'),
+    ("X", 'X'),
+    ("Y", 'Y'),
+    ("Z", 'Z'),
+    ("a", 'a'),
+    ("b", 'b'),
+    ("c", 'c'),
+    ("d", 'd'),
+    ("e", 'e'),
+    ("f", 'f'),
+    ("g", 'g'),
+    ("h", 'h'),
+    ("i", 'i'),
+    ("j", 'j'),
+    ("k", 'k'),
+    ("l", 'l'),
+    ("m", 'm'),
+    ("n", 'n'),
+    ("o", 'o'),
+    ("p", 'p'),
+    ("q", 'q'),
+    ("r", 'r'),
+    ("s", 's'),
+    ("t", 't'),
+    ("u", 'u'),
+    ("v", 'v'),
+    ("w", 'w'),
+    ("x", 'x'),
+    ("y", 'y'),
+    ("z", 'z'),
+    ("zero", '0'),
+    ("one", '1'),
+    ("two", '2'),
+    ("three", '3'),
+    ("four", '4'),
+    ("five", '5'),
+    ("six", '6'),
+    ("seven", '7'),
+    ("eight", '8'),
+    ("nine", '9'),
+    ("period", '.'),
+    ("comma", ','),
+    ("hyphen", '-'),
+];
+
+pub fn strip_subset_prefix(name: &str) -> &str {
+    if name.len() >= 7 {
+        let prefix = &name[..6];
+        if prefix
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+            && name.as_bytes().get(6) == Some(&b'+')
+        {
+            return &name[7..];
+        }
+    }
+    name
+}
+
+pub fn family_name(base: &str) -> String {
+    let stripped = strip_subset_prefix(base);
+    let lower = stripped.to_ascii_lowercase();
+    if lower.contains("helvetica") || lower == "arial" {
+        "Arial".to_owned()
+    } else if lower.contains("times") {
+        "Times New Roman".to_owned()
+    } else if lower.contains("courier") {
+        "Courier New".to_owned()
+    } else if lower == "symbol" {
+        "Symbol".to_owned()
+    } else {
+        stripped.to_owned()
+    }
+}
+
+pub fn style_from_name(name: &str) -> (bool, bool) {
+    let n = name.to_ascii_lowercase();
+    let bold = n.contains("bold") || n.contains("-bd") || n.ends_with("bd");
+    let italic = n.contains("italic") || n.contains("oblique") || n.contains("-it");
+    (bold, italic)
+}
+
+#[derive(Clone)]
+pub struct PdfFont {
+    pub name: String,
+    pub family: String,
+    pub bold: bool,
+    pub italic: bool,
+    widths: Vec<f64>,
+    first_char: u32,
+    encoding: Vec<u16>,
+    cid_map: HashMap<u32, char>,
+    to_unicode: HashMap<u32, char>,
+    is_cid: bool,
+    default_width: f64,
+    ttf: Option<Vec<u8>>,
+}
+
+impl PdfFont {
+    pub fn load(doc: &Document, font_ref: ObjectId, font_key: &str) -> Result<Self> {
+        let dict = doc.get_dictionary(font_ref).map_err(pdf_err)?;
+        let base = dict
+            .get(b"BaseFont")
+            .ok()
+            .and_then(|o| o.as_name().ok())
+            .map(|n| String::from_utf8_lossy(n).into_owned())
+            .unwrap_or_else(|| font_key.to_owned());
+        let family = family_name(&base);
+        let (mut bold, mut italic) = style_from_name(&base);
+        if let Ok(flags) = dict.get(b"Flags") {
+            let fv = match flags {
+                Object::Integer(v) => *v,
+                _ => 0,
+            };
+            if fv & 0x40000 != 0 {
+                bold = true;
+            }
+            if fv & 0x40 != 0 {
+                italic = true;
+            }
+        }
+        let subtype = dict
+            .get(b"Subtype")
+            .ok()
+            .and_then(|o| o.as_name().ok())
+            .map(|n| String::from_utf8_lossy(n).into_owned())
+            .unwrap_or_default();
+        let mut cid_map = HashMap::new();
+        let mut to_unicode = HashMap::new();
+        let is_cid = subtype == "Type0";
+        if is_cid {
+            if let Ok(desc_ref) = dict.get(b"DescendantFonts") {
+                if let Ok((_, Object::Array(arr))) = doc.dereference(desc_ref) {
+                    if let Some(first) = arr.first() {
+                        if let Ok(id) = first.as_reference() {
+                            if let Ok(desc) = doc.get_dictionary(id) {
+                                parse_cid_widths(desc, &mut cid_map);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Ok(tu_ref) = dict.get(b"ToUnicode") {
+            let stream_data = match doc.dereference(tu_ref) {
+                Ok((_, Object::Stream(s))) => Some(s.content.clone()),
+                Err(_) => tu_ref.as_stream().ok().map(|s| s.content.clone()),
+                Ok((_, _)) => None,
+            };
+            if let Some(data) = stream_data {
+                parse_to_unicode_cmap(&data, &mut to_unicode);
+            }
+        }
+        let (first_char, widths) = read_widths(doc, dict)?;
+        let encoding = build_encoding(doc, dict, &base)?;
+        let ttf = read_font_file2(doc, dict)?;
+        Ok(Self {
+            name: base,
+            family,
+            bold,
+            italic,
+            widths,
+            first_char,
+            encoding,
+            cid_map,
+            to_unicode,
+            is_cid,
+            default_width: 500.0,
+            ttf,
+        })
+    }
+
+    pub fn decode_string(&self, bytes: &[u8]) -> String {
+        if self.is_cid && bytes.len() >= 2 {
+            let mut out = String::new();
+            let mut i = 0;
+            while i + 1 < bytes.len() {
+                let code = u32::from(bytes[i]) * 256 + u32::from(bytes[i + 1]);
+                let ch = self
+                    .to_unicode
+                    .get(&code)
+                    .or_else(|| self.cid_map.get(&code))
+                    .copied()
+                    .unwrap_or('?');
+                out.push(ch);
+                i += 2;
+            }
+            return out;
+        }
+        bytes
+            .iter()
+            .map(|&b| {
+                let code = u32::from(b);
+                if let Some(&ch) = self.to_unicode.get(&code) {
+                    return ch;
+                }
+                let uni = self
+                    .encoding
+                    .get(b as usize)
+                    .copied()
+                    .unwrap_or(u16::from(b));
+                if u32::from(uni) <= 0x10FFFF {
+                    char::from_u32(u32::from(uni)).unwrap_or('?')
+                } else {
+                    '?'
+                }
+            })
+            .collect()
+    }
+
+    pub fn glyph_width(&self, byte: u8, font_size: f64) -> f64 {
+        let idx = byte as usize;
+        let ci = self.first_char as usize;
+        if idx >= ci {
+            let wi = idx - ci;
+            if let Some(&w) = self.widths.get(wi) {
+                return w / 1000.0 * font_size;
+            }
+        }
+        self.default_width / 1000.0 * font_size
+    }
+
+    pub fn string_width(&self, bytes: &[u8], font_size: f64) -> f64 {
+        if self.is_cid {
+            let n = bytes.len() / 2;
+            let mut w = 0.0;
+            for i in 0..n {
+                let code = u32::from(bytes[i * 2]) * 256 + u32::from(bytes[i * 2 + 1]);
+                let gw = self
+                    .to_unicode
+                    .get(&code)
+                    .map(|_| self.default_width)
+                    .unwrap_or(self.default_width);
+                w += gw / 1000.0 * font_size;
+            }
+            return w;
+        }
+        bytes.iter().map(|b| self.glyph_width(*b, font_size)).sum()
+    }
+
+    pub fn embed_info(&self, key: &str) -> Option<FontEmbed> {
+        let _ = key;
+        self.ttf.as_ref().map(|bytes| FontEmbed {
+            pdf_name: self.name.clone(),
+            family: self.family.clone(),
+            ttf_bytes: bytes.clone(),
+            bold: self.bold,
+            italic: self.italic,
+        })
+    }
+}
+
+fn pdf_err(e: lopdf::Error) -> Error {
+    Error::Pdf(e.to_string())
+}
+
+fn read_widths(doc: &Document, dict: &Dictionary) -> Result<(u32, Vec<f64>)> {
+    let first = dict
+        .get(b"FirstChar")
+        .ok()
+        .and_then(|o| o.as_i64().ok())
+        .unwrap_or(0) as u32;
+    let Ok(wobj) = dict.get(b"Widths") else {
+        return Ok((first, Vec::new()));
+    };
+    let arr = match doc.dereference(wobj) {
+        Ok((_, Object::Array(a))) => a.clone(),
+        Ok((_, _)) => return Ok((first, Vec::new())),
+        Err(_) => wobj.as_array().cloned().unwrap_or_default(),
+    };
+    let mut widths = Vec::with_capacity(arr.len());
+    for item in arr {
+        let w = match item {
+            Object::Integer(v) => v as f64,
+            Object::Real(v) => f64::from(v),
+            _ => 500.0,
+        };
+        widths.push(w);
+    }
+    Ok((first, widths))
+}
+
+fn build_encoding(doc: &Document, dict: &Dictionary, base: &str) -> Result<Vec<u16>> {
+    let mut table = WIN_ANSI.to_vec();
+    if let Ok(enc) = dict.get(b"Encoding") {
+        match enc {
+            Object::Name(n) if n.as_slice() == b"WinAnsiEncoding" => {}
+            Object::Name(n) if n.as_slice() == b"MacRomanEncoding" => {
+                table = WIN_ANSI.to_vec();
+            }
+            Object::Reference(id) => {
+                let d = doc.get_dictionary(*id).map_err(pdf_err)?;
+                if let Ok(diff) = d.get(b"Differences") {
+                    if let Ok(arr) = diff.as_array() {
+                        let mut code = 0u32;
+                        for item in arr {
+                            match item {
+                                Object::Integer(c) => code = *c as u32,
+                                Object::Name(glyph) => {
+                                    let g = String::from_utf8_lossy(glyph);
+                                    if let Some((_, ch)) =
+                                        GLYPH_TO_UNICODE.iter().find(|(name, _)| *name == g)
+                                    {
+                                        if (code as usize) < table.len() {
+                                            table[code as usize] = *ch as u16;
+                                        }
+                                    }
+                                    code += 1;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    } else {
+        let lower = base.to_ascii_lowercase();
+        if lower.contains("times") || lower.contains("courier") || lower.contains("helvetica") {
+            let _ = lower;
+        }
+    }
+    Ok(table)
+}
+
+fn parse_to_unicode_cmap(data: &[u8], map: &mut HashMap<u32, char>) {
+    let text = String::from_utf8_lossy(data);
+    parse_bfchar(&text, map);
+    parse_bfrange(&text, map);
+}
+
+fn parse_bfchar(text: &str, map: &mut HashMap<u32, char>) {
+    let mut in_bf = false;
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with("beginbfchar") {
+            in_bf = true;
+            continue;
+        }
+        if t.starts_with("endbfchar") {
+            in_bf = false;
+            continue;
+        }
+        if in_bf && t.starts_with('<') {
+            if let Some((src, dst)) = t.split_once('>') {
+                let src_hex = src.trim_start_matches('<');
+                let dst_part = dst.trim().trim_start_matches('<').trim_end_matches('>');
+                if let (Ok(code), Some(ch)) =
+                    (u32::from_str_radix(src_hex, 16), hex_to_char(dst_part))
+                {
+                    map.insert(code, ch);
+                }
+            }
+        }
+    }
+}
+
+fn parse_bfrange(text: &str, map: &mut HashMap<u32, char>) {
+    let mut in_bf = false;
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with("beginbfrange") {
+            in_bf = true;
+            continue;
+        }
+        if t.starts_with("endbfrange") {
+            in_bf = false;
+            continue;
+        }
+        if !in_bf || !t.starts_with('<') {
+            continue;
+        }
+        let parts: Vec<&str> = t.split_whitespace().collect();
+        if parts.len() >= 3 {
+            let start = parts[0].trim_matches(|c| c == '<' || c == '>');
+            let end = parts[1].trim_matches(|c| c == '<' || c == '>');
+            let dst = parts[2].trim_matches(|c| c == '<' || c == '>');
+            if let (Ok(s), Ok(e)) = (u32::from_str_radix(start, 16), u32::from_str_radix(end, 16)) {
+                if dst.len() >= 4 {
+                    if let Ok(base) = u32::from_str_radix(&dst[..4], 16) {
+                        for (i, code) in (s..=e).enumerate() {
+                            if let Some(ch) = char::from_u32(base + i as u32) {
+                                map.insert(code, ch);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn hex_to_char(hex: &str) -> Option<char> {
+    let h = hex.trim();
+    if h.len() >= 4 {
+        let code = u32::from_str_radix(&h[h.len() - 4..], 16).ok()?;
+        char::from_u32(code)
+    } else {
+        None
+    }
+}
+
+fn parse_cid_widths(_desc: &Dictionary, _map: &mut HashMap<u32, char>) {}
+
+fn read_font_file2(doc: &Document, dict: &Dictionary) -> Result<Option<Vec<u8>>> {
+    let desc = match dict.get(b"FontDescriptor") {
+        Ok(Object::Reference(id)) => doc.get_dictionary(*id).map_err(pdf_err)?,
+        Ok(Object::Dictionary(d)) => d,
+        _ => return Ok(None),
+    };
+    if let Ok(f) = desc.get(b"FontFile2") {
+        if let Ok((_, Object::Stream(s))) = doc.dereference(f) {
+            return Ok(Some(s.content.clone()));
+        }
+    }
+    Ok(None)
+}

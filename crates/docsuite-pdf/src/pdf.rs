@@ -59,6 +59,10 @@ impl Pdf {
         &self.doc
     }
 
+    pub fn lopdf_document(&self) -> &Document {
+        &self.doc
+    }
+
     pub fn page_id(&self, one_based: u32) -> Result<lopdf::ObjectId> {
         self.doc
             .get_pages()
