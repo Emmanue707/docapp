@@ -63,6 +63,8 @@ pub fn image_to_docx(
         width: w_pt,
         height: h_pt,
         rotate: 0,
+        source_rotate: 0,
+        crop_box: [0.0, 0.0, w_pt, h_pt],
         text: runs_to_text_lines(&runs),
         images: vec![PlacedImage {
             bytes,
@@ -72,6 +74,7 @@ pub fn image_to_docx(
             width: w_pt,
             height: h_pt,
             behind: true,
+            orient_fallback: true,
         }],
         vectors: Vec::new(),
     };
@@ -103,7 +106,7 @@ pub fn image_to_searchable_pdf(
         })
         .collect();
     if !words.is_empty() {
-        add_searchable_text_layer(&mut pdf, 1, &words, cancel, progress)?;
+        add_searchable_text_layer(&mut pdf, 1, &words, img.height, cancel, progress)?;
     }
     pdf.save(output)?;
     Ok(())
@@ -122,6 +125,7 @@ fn load_placed(input: &Path) -> Result<PlacedImage> {
         width: scaled.width as f64,
         height: scaled.height as f64,
         behind: false,
+        orient_fallback: true,
     })
 }
 

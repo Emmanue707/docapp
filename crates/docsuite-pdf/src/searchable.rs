@@ -6,7 +6,6 @@ use lopdf::content::{Content, Operation};
 use lopdf::{Object, StringFormat};
 
 use crate::annotate::ensure_f1_font_public;
-use crate::info::pdf_info;
 use crate::lopdf_map::map_err;
 use crate::pdf::Pdf;
 use crate::progress::step;
@@ -32,6 +31,7 @@ pub fn add_searchable_text_layer(
     pdf: &mut Pdf,
     page: u32,
     words: &[PlacedWord],
+    page_height_pt: f64,
     cancel: &CancelToken,
     progress: &Option<ProgressSink>,
 ) -> Result<()> {
@@ -42,7 +42,7 @@ pub fn add_searchable_text_layer(
     step(cancel, progress, &mut state, 0, 1, "searchable-text")?;
     let page_id = pdf.page_id(page)?;
     ensure_f1_font_public(pdf, page_id)?;
-    let page_h = pdf_page_height(pdf, page)?;
+    let page_h = page_height_pt.max(1.0);
     let mut ops: Vec<Operation> = Vec::new();
     ops.push(Operation::new("q", vec![]));
     ops.push(Operation::new("BT", vec![]));
@@ -90,12 +90,6 @@ pub fn add_searchable_text_layer(
     Ok(())
 }
 
-fn pdf_page_height(pdf: &Pdf, page: u32) -> Result<f64> {
-    let info = pdf_info(pdf)?;
-    let idx = (page.saturating_sub(1)) as usize;
-    Ok(info.page_sizes.get(idx).map(|s| s.height).unwrap_or(792.0))
-}
-
 #[cfg(test)]
 mod tests {
     use docsuite_core::CancelToken;
@@ -124,7 +118,7 @@ mod tests {
             },
         ];
         let cancel = CancelToken::new();
-        add_searchable_text_layer(&mut pdf, 1, &words, &cancel, &None).unwrap();
+        add_searchable_text_layer(&mut pdf, 1, &words, 792.0, &cancel, &None).unwrap();
         let page_id = pdf.page_id(1).unwrap();
         let raw = pdf.lopdf_document().get_page_content(page_id);
         let decoded = String::from_utf8_lossy(&raw);
