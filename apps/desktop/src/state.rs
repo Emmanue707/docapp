@@ -2,6 +2,14 @@ use std::collections::HashSet;
 
 use docsuite_pdf::{PageRanges, PdfRect};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ViewerInteractionMode {
+    #[default]
+    Normal,
+    Crop,
+    Signature,
+}
+
 #[derive(Clone, Debug)]
 pub struct UndoStack {
     cap: usize,
@@ -22,6 +30,7 @@ impl UndoStack {
         !self.past.is_empty()
     }
 
+    #[allow(dead_code)]
     pub fn can_redo(&self) -> bool {
         !self.future.is_empty()
     }
@@ -40,6 +49,7 @@ impl UndoStack {
         Some(prev)
     }
 
+    #[allow(dead_code)]
     pub fn redo(&mut self, current: &[u8]) -> Option<Vec<u8>> {
         let next = self.future.pop()?;
         self.past.push(current.to_vec());
