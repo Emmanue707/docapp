@@ -151,8 +151,9 @@ fn write_document(
     let mut ids = DocPrGen::new();
     match mode {
         PdfToWordMode::ExactLook => {
+            let last = pages.len().saturating_sub(1);
             for (pi, page) in pages.iter().enumerate() {
-                body.push_str(&exact_page_body(page, pi, &mut ids));
+                body.push_str(&exact_page_body(page, pi, &mut ids, pi == last));
             }
         }
         PdfToWordMode::Editable => {
@@ -185,7 +186,15 @@ fn write_document(
     Ok(())
 }
 
-fn exact_page_body(page: &ExtractedPage, page_index: usize, ids: &mut DocPrGen) -> String {
+const ANCHOR_P_PR: &str =
+    r#"<w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/></w:pPr>"#;
+
+fn exact_page_body(
+    page: &ExtractedPage,
+    page_index: usize,
+    ids: &mut DocPrGen,
+    is_last: bool,
+) -> String {
     let mut out = String::new();
     let w_twips = (page.width * TWIPS_PER_PT as f64) as i64;
     let h_twips = (page.height * TWIPS_PER_PT as f64) as i64;
@@ -205,12 +214,36 @@ fn exact_page_body(page: &ExtractedPage, page_index: usize, ids: &mut DocPrGen) 
         out.push_str(&image_anchor(img, page_index, ii, ids, z + 100));
         z += 1;
     }
-    for line in &page.text {
+    let mut text_lines: Vec<&TextLine> = page.text.iter().collect();
+    let columns = column_bounds(&page.text, page.width);
+    let multi_col = columns.len() > 1;
+    text_lines.sort_by(|a, b| {
+        if multi_col {
+            let col_a = column_index(a.x, &columns);
+            let col_b = column_index(b.x, &columns);
+            col_a
+                .cmp(&col_b)
+                .then_with(|| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal))
+                .then_with(|| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal))
+        } else {
+            a.y.partial_cmp(&b.y)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal))
+        }
+    });
+    for line in text_lines {
         out.push_str(&text_line_anchor(line, ids, z + 1000));
+        z += 1;
     }
-    out.push_str(&format!(
-        r#"<w:sectPr>{pg_sz}<w:pgMar w:top="0" w:right="0" w:bottom="0" w:left="0" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>"#
-    ));
+    if is_last {
+        out.push_str(&format!(
+            r#"<w:sectPr>{pg_sz}<w:pgMar w:top="0" w:right="0" w:bottom="0" w:left="0" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>"#
+        ));
+    } else {
+        out.push_str(&format!(
+            r#"<w:p>{ANCHOR_P_PR}<w:pPr><w:sectPr>{pg_sz}<w:type w:val="nextPage"/><w:pgMar w:top="0" w:right="0" w:bottom="0" w:left="0" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr></w:pPr><w:r><w:rPr><w:sz w:val="2"/></w:rPr></w:r></w:p>"#
+        ));
+    }
     out
 }
 
@@ -248,9 +281,20 @@ fn text_line_anchor(line: &TextLine, ids: &mut DocPrGen, z: u32) -> String {
     let h = pt_to_emu(max_size * 1.05);
     let line_twips = (max_size * TWIPS_PER_PT as f64).round().max(20.0) as i64;
     let doc_id = ids.alloc();
-    let inner: String = line.runs.iter().map(run_xml).collect();
+    let mut inner = String::new();
+    for (ri, run) in line.runs.iter().enumerate() {
+        if ri > 0 {
+            let prev = &line.runs[ri - 1];
+            let gap = run.x - (prev.x + prev.width);
+            let size = prev.font_size.max(run.font_size);
+            if gap > size * 0.06 {
+                inner.push_str(r#"<w:r><w:t xml:space="preserve"> </w:t></w:r>"#);
+            }
+        }
+        inner.push_str(&run_xml(run));
+    }
     format!(
-        r#"<w:p><w:r><w:drawing>
+        r#"<w:p>{ANCHOR_P_PR}<w:r><w:drawing>
 <wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="{z}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">
 <wp:simplePos x="0" y="0"/>
 <wp:positionH relativeFrom="page"><wp:posOffset>{x}</wp:posOffset></wp:positionH>
@@ -277,7 +321,7 @@ fn image_anchor(img: &PlacedImage, pi: usize, ii: usize, ids: &mut DocPrGen, z: 
     let rid = format!("rIdImg{pi}_{ii}");
     let doc_id = ids.alloc();
     format!(
-        r#"<w:p><w:r><w:drawing>
+        r#"<w:p>{ANCHOR_P_PR}<w:r><w:drawing>
 <wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="{z}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">
 <wp:simplePos x="0" y="0"/>
 <wp:positionH relativeFrom="page"><wp:posOffset>{x}</wp:posOffset></wp:positionH>
@@ -347,7 +391,7 @@ fn vector_anchor(vp: &VectorPath, ids: &mut DocPrGen, z: u32) -> String {
         .unwrap_or_default();
     let doc_id = ids.alloc();
     format!(
-        r#"<w:p><w:r><w:drawing>
+        r#"<w:p>{ANCHOR_P_PR}<w:r><w:drawing>
 <wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="{z}" behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1">
 <wp:simplePos x="0" y="0"/>
 <wp:positionH relativeFrom="page"><wp:posOffset>{x_emu}</wp:posOffset></wp:positionH>
@@ -399,42 +443,38 @@ fn path_bounds(vp: &VectorPath) -> (f64, f64, f64, f64) {
 
 fn editable_page_body(page: &ExtractedPage, pi: usize, ids: &mut DocPrGen) -> String {
     let mut out = String::new();
-    if let Some(tbl) = detect_table(page) {
-        out.push_str(&tbl);
-    } else {
-        let columns = column_bounds(&page.text, page.width);
-        let mut lines: Vec<&TextLine> = page.text.iter().collect();
-        lines.sort_by(|a, b| {
+    let columns = column_bounds(&page.text, page.width);
+    let multi_col = columns.len() > 1;
+    let mut lines: Vec<&TextLine> = page.text.iter().collect();
+    lines.sort_by(|a, b| {
+        if multi_col {
             let col_a = column_index(a.x, &columns);
             let col_b = column_index(b.x, &columns);
             col_a
                 .cmp(&col_b)
                 .then_with(|| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal))
                 .then_with(|| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal))
-        });
-        let mut para_lines: Vec<&TextLine> = Vec::new();
-        for line in lines {
-            if para_lines.is_empty() {
-                para_lines.push(line);
-                continue;
-            }
-            let prev = para_lines.last().copied().unwrap();
-            let size = prev.runs.first().map(|r| r.font_size).unwrap_or(12.0);
-            let y_gap = line.y - prev.y;
-            let same_col = column_index(line.x, &columns) == column_index(prev.x, &columns);
-            if same_col && y_gap > size * 0.35 && y_gap < size * 1.35 {
-                para_lines.push(line);
-            } else {
-                out.push_str(&editable_paragraph(&para_lines));
-                para_lines = vec![line];
-            }
+        } else {
+            a.y.partial_cmp(&b.y)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal))
         }
-        if !para_lines.is_empty() {
-            out.push_str(&editable_paragraph(&para_lines));
+    });
+    let mut z: u32 = 0;
+    for vp in &page.vectors {
+        let stroke_path = vp.stroke.is_some() && vp.fill.is_none();
+        if stroke_path {
+            out.push_str(&vector_anchor(vp, ids, z));
+            z += 1;
         }
-        for (ii, img) in page.images.iter().enumerate() {
-            out.push_str(&image_anchor(img, pi, ii, ids, 1));
-        }
+    }
+    for (ii, img) in page.images.iter().enumerate() {
+        out.push_str(&image_anchor(img, pi, ii, ids, z + 100));
+        z += 1;
+    }
+    for line in lines {
+        out.push_str(&editable_text_anchor(line, ids, z + 1000));
+        z += 1;
     }
     let w_twips = (page.width * TWIPS_PER_PT as f64) as i64;
     let h_twips = (page.height * TWIPS_PER_PT as f64) as i64;
@@ -475,85 +515,93 @@ fn column_index(x: f64, bounds: &[f64]) -> usize {
     col
 }
 
-fn editable_paragraph(lines: &[&TextLine]) -> String {
-    let mut parts: Vec<TextRun> = Vec::new();
-    let body_size = lines
+fn editable_text_anchor(line: &TextLine, ids: &mut DocPrGen, z: u32) -> String {
+    let x = pt_to_emu(line.x);
+    let y = pt_to_emu(line.y);
+    let w = pt_to_emu(line.width);
+    let max_size = line
+        .runs
         .iter()
-        .flat_map(|l| l.runs.iter())
         .map(|r| r.font_size)
-        .fold(0.0f64, |a, b| a.max(b));
-    for (i, line) in lines.iter().enumerate() {
-        for run in &line.runs {
-            if let Some(last) = parts.last_mut() {
-                let same_style = last.font_family == run.font_family
-                    && (last.font_size - run.font_size).abs() < 0.5
-                    && last.color == run.color
-                    && last.bold == run.bold
-                    && last.italic == run.italic;
-                if same_style {
-                    last.text.push_str(&run.text);
-                    continue;
-                }
-            }
-            parts.push(run.clone());
-        }
-        if i + 1 < lines.len() {
-            let joined = join_lines(lines[i], lines[i + 1]);
-            if joined {
-                if let Some(last) = parts.last_mut() {
-                    if last.text.ends_with('-') {
-                        last.text = last.text.trim_end_matches('-').to_owned();
-                    }
-                }
-            } else if let Some(last) = parts.last_mut() {
-                if !last.text.ends_with(' ') && !last.text.is_empty() {
-                    last.text.push(' ');
-                }
-            }
-        }
-    }
-    let heading = parts
+        .fold(0.0f64, f64::max)
+        .max(line.height);
+    let h = pt_to_emu(max_size * 1.05);
+    let line_twips = (max_size * TWIPS_PER_PT as f64).round().max(20.0) as i64;
+    let doc_id = ids.alloc();
+    let (ppr_extra, inner) = editable_line_inner(line);
+    format!(
+        r#"<w:p>{ANCHOR_P_PR}<w:r><w:drawing>
+<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="{z}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">
+<wp:simplePos x="0" y="0"/>
+<wp:positionH relativeFrom="page"><wp:posOffset>{x}</wp:posOffset></wp:positionH>
+<wp:positionV relativeFrom="page"><wp:posOffset>{y}</wp:posOffset></wp:positionV>
+<wp:extent cx="{w}" cy="{h}"/>
+<wp:effectExtent l="0" t="0" r="0" b="0"/>
+<wp:wrapNone/>
+<wp:docPr id="{doc_id}" name="Text{doc_id}"/>
+<wp:cNvGraphicFramePr/>
+<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+<wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{w}" cy="{h}"/></a:xfrm><a:prstGeom prst="rect"/></wps:spPr>
+<wps:txbx><w:txbxContent><w:p><w:pPr><w:spacing w:line="{line_twips}" w:lineRule="exact"/>{ppr_extra}</w:pPr>{inner}</w:p></w:txbxContent></wps:txbx>
+<wps:bodyPr wrap="none" anchor="t" lIns="0" tIns="0" rIns="0" bIns="0"/></wps:wsp>
+</a:graphicData></a:graphic>
+</wp:anchor></w:drawing></w:r></w:p>"#
+    )
+}
+
+fn editable_line_inner(line: &TextLine) -> (String, String) {
+    let mut runs: Vec<&TextRun> = line.runs.iter().collect();
+    runs.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+    let body_size = runs.iter().map(|r| r.font_size).fold(0.0f64, f64::max);
+    let heading = runs
         .iter()
         .any(|r| r.bold && r.font_size > body_size * 1.15)
-        || parts
+        || runs
             .first()
             .map(|r| r.font_size > body_size * 1.2)
             .unwrap_or(false);
-    let bullet = parts
+    let bullet = runs
         .first()
         .and_then(|r| r.text.chars().next())
         .map(|c| c == '•' || c == '-' || c == '*')
         .unwrap_or(false);
-    let mut ppr = String::from(r#"<w:spacing w:after="120" w:line="276" w:lineRule="auto"/>"#);
-    if heading {
-        ppr = String::from(
-            r#"<w:pStyle w:val="Heading1"/><w:spacing w:after="120" w:line="276" w:lineRule="auto"/>"#,
-        );
+    let ppr_extra = if heading {
+        r#"<w:pStyle w:val="Heading1"/>"#.to_owned()
     } else if bullet {
-        ppr = String::from(
-            r#"<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr><w:spacing w:after="60" w:line="276" w:lineRule="auto"/>"#,
-        );
-    }
+        r#"<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>"#.to_owned()
+    } else {
+        String::new()
+    };
     let mut inner = String::new();
-    for run in parts {
-        let mut r = run;
-        if bullet && inner.is_empty() {
-            r.text = r.text.trim_start_matches(['•', '-', '*', ' ']).to_owned();
+    for (ri, run) in runs.iter().enumerate() {
+        if ri > 0 {
+            let prev = runs[ri - 1];
+            let gap = run.x - (prev.x + prev.width);
+            let size = prev.font_size.max(run.font_size);
+            if gap > size * 0.06 {
+                inner.push_str(r#"<w:r><w:t xml:space="preserve"> </w:t></w:r>"#);
+            }
         }
-        inner.push_str(&run_xml(&r));
+        inner.push_str(&run_xml(run));
     }
-    format!(r#"<w:p><w:pPr>{ppr}</w:pPr>{inner}</w:p>"#)
+    let _ = bullet;
+    (ppr_extra, inner)
 }
 
-fn join_lines(a: &TextLine, b: &TextLine) -> bool {
-    let size = a.runs.first().map(|r| r.font_size).unwrap_or(12.0);
-    (b.y - a.y).abs() < size * 1.8
-        && a.runs
-            .last()
-            .map(|r| r.text.ends_with('-'))
-            .unwrap_or(false)
+#[allow(dead_code)]
+fn line_in_table_rect(line: &TextLine, h_ys: &[f64], v_xs: &[f64]) -> bool {
+    if h_ys.len() < 2 || v_xs.len() < 2 {
+        return false;
+    }
+    let y0 = h_ys[0];
+    let y1 = *h_ys.last().unwrap();
+    let x0 = v_xs[0];
+    let x1 = *v_xs.last().unwrap();
+    let cy = line.y + line.height * 0.5;
+    line.x >= x0 - 4.0 && line.x + line.width <= x1 + 8.0 && cy >= y0 - 4.0 && cy <= y1
 }
 
+#[allow(dead_code)]
 fn detect_table(page: &ExtractedPage) -> Option<String> {
     let mut h_ys: Vec<f64> = Vec::new();
     let mut v_xs: Vec<f64> = Vec::new();
@@ -576,7 +624,7 @@ fn detect_table(page: &ExtractedPage) -> Option<String> {
     }
     let rows = h_ys.len() - 1;
     let cols = v_xs.len() - 1;
-    if rows < 2 || cols < 2 {
+    if rows < 2 || cols < 2 || rows > 6 || cols > 6 {
         return None;
     }
     let mut cell_texts: Vec<Vec<String>> = Vec::new();
@@ -623,6 +671,31 @@ fn detect_table(page: &ExtractedPage) -> Option<String> {
     }
     tbl.push_str("</w:tbl>");
     Some(tbl)
+}
+
+#[allow(dead_code)]
+fn table_grid_bounds(page: &ExtractedPage) -> Option<(Vec<f64>, Vec<f64>)> {
+    let mut h_ys: Vec<f64> = Vec::new();
+    let mut v_xs: Vec<f64> = Vec::new();
+    for v in &page.vectors {
+        if let Some(y) = h_line_y(v) {
+            if !h_ys.iter().any(|hy| (hy - y).abs() < 2.0) {
+                h_ys.push(y);
+            }
+        }
+        if let Some(x) = v_line_x(v) {
+            if !v_xs.iter().any(|vx| (vx - x).abs() < 2.0) {
+                v_xs.push(x);
+            }
+        }
+    }
+    h_ys.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    v_xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    if h_ys.len() >= 3 && v_xs.len() >= 3 {
+        Some((h_ys, v_xs))
+    } else {
+        None
+    }
 }
 
 fn h_line_y(v: &VectorPath) -> Option<f64> {
