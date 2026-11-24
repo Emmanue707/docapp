@@ -200,9 +200,7 @@ fn exact_page_body(
     let mut out = String::new();
     let w_twips = (page.width * TWIPS_PER_PT as f64) as i64;
     let h_twips = (page.height * TWIPS_PER_PT as f64) as i64;
-    let pg_sz = if page.rotate == 90 || page.rotate == 270 {
-        format!(r#"<w:pgSz w:w="{h_twips}" w:h="{w_twips}" w:orient="landscape"/>"#)
-    } else if page.width > page.height {
+    let pg_sz = if page.width > page.height {
         format!(r#"<w:pgSz w:w="{w_twips}" w:h="{h_twips}" w:orient="landscape"/>"#)
     } else {
         format!(r#"<w:pgSz w:w="{w_twips}" w:h="{h_twips}"/>"#)
