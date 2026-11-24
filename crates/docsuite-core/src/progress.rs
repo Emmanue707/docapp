@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+#[derive(Clone)]
 pub struct Progress {
     pub done: u64,
     pub total: u64,
