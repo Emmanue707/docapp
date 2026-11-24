@@ -24,6 +24,7 @@ mod page_rotate;
 mod pdf_image;
 mod pdf_text;
 mod pdf_word;
+mod reading_order;
 pub mod types;
 #[cfg(feature = "typst")]
 pub mod typst_render;

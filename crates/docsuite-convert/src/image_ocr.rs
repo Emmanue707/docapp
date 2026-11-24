@@ -8,6 +8,7 @@ use docsuite_pdf::{ImagePageFit, PlacedWord, add_searchable_text_layer, pdf_from
 use crate::PdfToWordMode;
 use crate::docx::write_docx;
 use crate::ocr_util::{MAX_OCR_LONG_SIDE, cap_long_side, decode_image_gray, runs_to_text_lines};
+use crate::reading_order::ordered_plain_from_runs;
 use crate::types::{ExtractedPage, ImageKind, PlacedImage};
 
 pub struct ImageOcrOptions {
@@ -16,19 +17,7 @@ pub struct ImageOcrOptions {
 }
 
 fn runs_plain(runs: &[crate::types::TextRun]) -> String {
-    let mut out = String::new();
-    for line in runs_to_text_lines(runs) {
-        for (ri, run) in line.runs.iter().enumerate() {
-            if ri > 0 {
-                out.push(' ');
-            }
-            out.push_str(&run.text);
-        }
-        if !line.runs.is_empty() {
-            out.push('\n');
-        }
-    }
-    out
+    ordered_plain_from_runs(runs)
 }
 
 pub fn image_to_txt(

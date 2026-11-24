@@ -8,7 +8,7 @@ use docsuite_convert::{
     image_to_txt, pdf_to_searchable_pdf, pdf_to_txt,
 };
 use docsuite_core::{CancelToken, ProgressSink};
-use docsuite_ocr::{BBox, Line, open_recognizer, predict_type};
+use docsuite_ocr::{BBox, open_recognizer, predict_type};
 use docsuite_pdf::PageRanges;
 
 use crate::models::models_dir;
@@ -92,7 +92,15 @@ fn run_image(
         .recognizer
         .recognize(&scaled, region, cancel)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    print_lines(&lines, opts.types)?;
+    let text = docsuite_convert::lines_plain_text(&lines);
+    if opts.types {
+        for word in text.split_whitespace() {
+            let guess = predict_type(word);
+            println!("{} {}", word, field_type_label(guess.field_type));
+        }
+    } else {
+        print!("{text}");
+    }
     Ok(())
 }
 
@@ -134,28 +142,6 @@ fn run_pdf(
         }
     } else {
         print!("{text}");
-    }
-    Ok(())
-}
-
-fn print_lines(lines: &[Line], types: bool) -> Result<()> {
-    for line in lines {
-        for word in &line.words {
-            let text = word
-                .candidates
-                .first()
-                .map(|c| c.text.as_str())
-                .unwrap_or("");
-            if text.is_empty() {
-                continue;
-            }
-            if types {
-                let guess = predict_type(text);
-                println!("{} {}", text, field_type_label(guess.field_type));
-            } else {
-                println!("{text}");
-            }
-        }
     }
     Ok(())
 }

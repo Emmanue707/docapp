@@ -11,6 +11,7 @@ use crate::extract::extract_page;
 use crate::ocr_util::{lines_plain_text, runs_to_text_lines};
 use crate::page_rotate::{display_run_to_user_space, page_size_user};
 use crate::pdf_word::is_scanned;
+use crate::reading_order::ordered_plain_from_runs;
 use crate::types::{ExtractedPage, TextRun};
 
 pub struct PdfTextOptions {
@@ -36,19 +37,7 @@ fn page_plain_from_extract(page: &ExtractedPage) -> String {
 }
 
 fn runs_plain(runs: &[TextRun]) -> String {
-    let mut out = String::new();
-    for line in runs_to_text_lines(runs) {
-        for (ri, run) in line.runs.iter().enumerate() {
-            if ri > 0 {
-                out.push(' ');
-            }
-            out.push_str(&run.text);
-        }
-        if !line.runs.is_empty() {
-            out.push('\n');
-        }
-    }
-    out
+    ordered_plain_from_runs(runs)
 }
 
 fn runs_to_placed(runs: &[TextRun], page: &ExtractedPage) -> Vec<PlacedWord> {

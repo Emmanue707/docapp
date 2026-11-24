@@ -114,6 +114,7 @@ pub fn runs_to_text_lines(runs: &[TextRun]) -> Vec<TextLine> {
     if runs.is_empty() {
         return Vec::new();
     }
+    let runs = crate::reading_order::order_text_runs(runs);
     let mut sorted: Vec<&TextRun> = runs.iter().collect();
     sorted.sort_by(|a, b| {
         a.y.partial_cmp(&b.y)
@@ -142,6 +143,8 @@ pub fn runs_to_text_lines(runs: &[TextRun]) -> Vec<TextLine> {
 }
 
 fn finish_line(runs: &[TextRun], y: f64, height: f64) -> TextLine {
+    let mut runs: Vec<TextRun> = runs.to_vec();
+    runs.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
     let x = runs.iter().map(|r| r.x).fold(f64::INFINITY, f64::min);
     let width = runs
         .iter()
@@ -170,6 +173,7 @@ pub fn apply_ocr_to_scanned_page(
 }
 
 pub fn lines_plain_text(lines: &[Line]) -> String {
+    let lines = crate::reading_order::order_ocr_lines(lines);
     let mut out = String::new();
     for line in lines {
         let mut first = true;

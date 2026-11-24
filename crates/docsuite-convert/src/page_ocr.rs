@@ -39,6 +39,7 @@ impl RecognizerPageOcr {
                 lines = map_lines_from_rotated(&lines, ocr_rot, scaled.width, scaled.height);
             }
         }
+        lines = crate::reading_order::order_ocr_lines(&lines);
         Ok((lines, work.width, work.height))
     }
 
