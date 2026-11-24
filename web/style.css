@@ -1,0 +1,161 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: light dark;
+  --bg: #f4f6f7;
+  --fg: #1a1d21;
+  --muted: #5c6470;
+  --border: #d4d8dc;
+  --card: #fff;
+  --accent: #1b4d3e;
+  --accent-fg: #f4f7f5;
+  --accent-hover: #163f33;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121416;
+    --fg: #e8eaed;
+    --muted: #9aa3ad;
+    --border: #2c3238;
+    --card: #1a1d21;
+    --accent: #3cb882;
+    --accent-fg: #0d1511;
+    --accent-hover: #4fd49a;
+  }
+}
+
+html {
+  font-size: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  line-height: 1.55;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+a {
+  color: var(--accent);
+}
+
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.wrap {
+  width: min(42rem, 100% - 1.5rem);
+  margin-inline: auto;
+  padding-block: 1.5rem 3rem;
+}
+
+.site-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 2rem;
+}
+
+.site-head img {
+  width: 2rem;
+  height: 2rem;
+  display: block;
+}
+
+.site-head .name {
+  font-weight: 600;
+  font-size: 1.125rem;
+  letter-spacing: -0.02em;
+}
+
+.hero h1 {
+  margin: 0 0 0.75rem;
+  font-size: clamp(1.6rem, 6vw, 2.4rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.lead {
+  margin: 0 0 1.5rem;
+  max-width: 36em;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.btn {
+  display: inline-block;
+  padding: 0.55rem 1rem;
+  border-radius: 6px;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--fg);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: transparent;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn:hover {
+  border-color: var(--muted);
+}
+
+section {
+  margin-top: 2.5rem;
+}
+
+section h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+ul.features {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+ul.features li {
+  margin-bottom: 0.35rem;
+}
+
+.dl-list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.site-foot {
+  margin-top: 3rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.site-foot p {
+  margin: 0.35rem 0;
+}

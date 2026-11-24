@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://docapp.waghitech.com/sitemap.xml
