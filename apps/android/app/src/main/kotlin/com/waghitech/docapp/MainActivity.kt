@@ -17,9 +17,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -98,6 +100,8 @@ private fun DocappRoot(onPersistUri: (Uri) -> Unit) {
     var cancelHandle by remember { mutableStateOf<CancelHandle?>(null) }
     var workJob by remember { mutableStateOf<Job?>(null) }
     var dialog by remember { mutableStateOf<String?>(null) }
+    var signPassword by remember { mutableStateOf("") }
+    var signP12 by remember { mutableStateOf<File?>(null) }
 
     fun openUri(uri: Uri) {
         val resolver = context.contentResolver
@@ -129,6 +133,19 @@ private fun DocappRoot(onPersistUri: (Uri) -> Unit) {
             if (uri != null) {
                 openUri(uri)
             }
+        }
+
+    val pickSignP12 =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri == null) {
+                return@rememberLauncherForActivityResult
+            }
+            try {
+                onPersistUri(uri)
+            } catch (_: SecurityException) {
+            }
+            val name = UriFiles.displayName(context.contentResolver, uri)
+            signP12 = UriFiles.copyToCache(context, uri, name)
         }
 
     val saveDoc =
@@ -301,6 +318,12 @@ private fun DocappRoot(onPersistUri: (Uri) -> Unit) {
                         engine.toDocx(src.absolutePath, out.absolutePath, false, cancel, progressListener)
                     }
                 }
+                DocTool.Sign -> {
+                    if (!UriFiles.isPdf(mime)) {
+                        return@ToolsSheet
+                    }
+                    dialog = "sign"
+                }
                 DocTool.Ocr -> {
                     if (!models.ready()) {
                         dialog = "models"
@@ -358,6 +381,55 @@ private fun DocappRoot(onPersistUri: (Uri) -> Unit) {
                         }
                     },
                 ) { Text(stringResource(R.string.download_models)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { dialog = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    } else if (dialog == "sign") {
+        AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text(stringResource(R.string.sign_digital_title)) },
+            text = {
+                Column {
+                    TextButton(onClick = { pickSignP12.launch(arrayOf("*/*")) }) {
+                        Text(stringResource(R.string.sign_pick_p12))
+                    }
+                    signP12?.let { Text(it.name) }
+                    OutlinedTextField(
+                        value = signPassword,
+                        onValueChange = { signPassword = it },
+                        label = { Text(stringResource(R.string.sign_password)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val src = workFile
+                        val p12 = signP12
+                        if (src == null || p12 == null) {
+                            return@TextButton
+                        }
+                        dialog = null
+                        runJob {
+                            val cancel = cancelHandle ?: return@runJob
+                            val out = engine.workCopy(src, "cms")
+                            engine.digitalSignPdf(
+                                src.absolutePath,
+                                out.absolutePath,
+                                p12.absolutePath,
+                                signPassword,
+                                cancel,
+                                progressListener,
+                            ).onSuccess { workFile = out }
+                        }
+                    },
+                ) { Text(stringResource(R.string.sign_apply)) }
             },
             dismissButton = {
                 TextButton(onClick = { dialog = null }) {

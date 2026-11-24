@@ -14,6 +14,10 @@
     <string name="add_text">Add text</string>
     <string name="add_image">Add image</string>
     <string name="sign">Sign</string>
+    <string name="sign_digital_title">Digital signature</string>
+    <string name="sign_pick_p12">Pick certificate (.p12 / PEM pair)</string>
+    <string name="sign_password">Keystore password</string>
+    <string name="sign_apply">Sign with certificate</string>
     <string name="convert_word">Convert to Word</string>
     <string name="images_to_pdf">Images to PDF</string>
     <string name="ocr">OCR</string>

@@ -19,6 +19,7 @@ import uniffi.docsuite_ffi.rotate
 import uniffi.docsuite_ffi.split
 import uniffi.docsuite_ffi.stampImage
 import uniffi.docsuite_ffi.stampText
+import uniffi.docsuite_ffi.signPdfFfi
 import uniffi.docsuite_ffi.visibleSignatureFfi
 import java.io.File
 
@@ -108,6 +109,29 @@ class DocEngine {
         progress: ProgressListener?,
     ): Result<Unit> = onIo {
         stampImage(path, page.toUInt(), rect, imagePath, output, cancel, progress)
+    }
+
+    suspend fun digitalSignPdf(
+        path: String,
+        output: String,
+        p12Path: String,
+        password: String,
+        cancel: CancelHandle,
+        progress: ProgressListener?,
+    ): Result<Unit> = onIo {
+        signPdfFfi(
+            path,
+            output,
+            p12Path,
+            password,
+            null,
+            null,
+            null,
+            null,
+            null,
+            cancel,
+            progress,
+        )
     }
 
     suspend fun signPdf(
