@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use docsuite_convert::extract::extract_page;
 use docsuite_convert::{
-    ImageToPdfOptions, PdfToWordMode, PdfToWordOptions, image_to_pdf, pdf_to_docx,
+    ImageToPdfOptions, PdfToWordMode, PdfToWordOptions, docx_to_odt as convert_docx_to_odt,
+    image_to_pdf, odt_to_docx as convert_odt_to_docx, pdf_to_docx,
 };
 use docsuite_core::{CancelToken, Error, Progress, ProgressSink};
 use docsuite_models::{
@@ -409,6 +410,32 @@ pub fn image_to_pdf_ffi(
         &token,
         &sink,
     )?;
+    Ok(())
+}
+
+#[uniffi::export]
+pub fn odt_to_docx(
+    path: String,
+    out: String,
+    cancel: Arc<CancelHandle>,
+    progress: Option<Box<dyn ProgressListener>>,
+) -> Result<(), DocsuiteError> {
+    let token = token_from(&cancel);
+    let sink = progress_sink(progress);
+    convert_odt_to_docx(Path::new(&path), Path::new(&out), &token, &sink)?;
+    Ok(())
+}
+
+#[uniffi::export]
+pub fn docx_to_odt(
+    path: String,
+    out: String,
+    cancel: Arc<CancelHandle>,
+    progress: Option<Box<dyn ProgressListener>>,
+) -> Result<(), DocsuiteError> {
+    let token = token_from(&cancel);
+    let sink = progress_sink(progress);
+    convert_docx_to_odt(Path::new(&path), Path::new(&out), &token, &sink)?;
     Ok(())
 }
 
