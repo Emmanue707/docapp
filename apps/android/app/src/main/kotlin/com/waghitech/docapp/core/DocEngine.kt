@@ -193,6 +193,26 @@ class DocEngine {
     suspend fun pageText(path: String, page: Int): Result<String> =
         onIo { extractTextLayer(path, page.toUInt()) }
 
+    suspend fun odtToDocx(
+        path: String,
+        out: String,
+        cancel: CancelHandle,
+        progress: ProgressListener?,
+    ): Result<Unit> =
+        onIo {
+            uniffi.docsuite_ffi.odtToDocx(path, out, cancel, progress)
+        }
+
+    suspend fun docxToOdt(
+        path: String,
+        out: String,
+        cancel: CancelHandle,
+        progress: ProgressListener?,
+    ): Result<Unit> =
+        onIo {
+            uniffi.docsuite_ffi.docxToOdt(path, out, cancel, progress)
+        }
+
     fun workCopy(src: File, suffix: String = "edit"): File {
         val parent = src.parentFile ?: error("no parent")
         val name = src.nameWithoutExtension
