@@ -16,8 +16,9 @@ use docsuite_models::{
 };
 use docsuite_ocr::{FieldType, predict_type, status as models_status_fn};
 use docsuite_pdf::{
-    PageRanges, Pdf, PdfRect, Rgb, SignatureStamp, add_image, add_text, crop, delete_pages, merge,
-    pdf_info, reorder, rotate, split, visible_signature,
+    DigitalSignOptions, PageRanges, Pdf, PdfRect, PdfSubFilter, Rgb, SignatureReport,
+    SignatureStamp, add_image, add_text, crop, delete_pages, load_identity_from_p12, merge,
+    pdf_info, reorder, rotate, sign_pdf_path, split, verify_pdf_bytes, visible_signature,
 };
 
 #[cfg(feature = "ocrs")]
@@ -562,6 +563,92 @@ pub fn detection_model_filename() -> String {
 #[uniffi::export]
 pub fn recognition_model_filename() -> String {
     RECOGNITION_FILE.to_owned()
+}
+
+#[derive(uniffi::Record)]
+pub struct SignatureReportFfi {
+    pub signer_cn: String,
+    pub signing_time: Option<String>,
+    pub digest_ok: bool,
+    pub signature_valid: bool,
+    pub covers_document: bool,
+    pub cert_trust: String,
+}
+
+impl From<SignatureReport> for SignatureReportFfi {
+    fn from(r: SignatureReport) -> Self {
+        Self {
+            signer_cn: r.signer_cn,
+            signing_time: r.signing_time,
+            digest_ok: r.digest_ok,
+            signature_valid: r.signature_valid,
+            covers_document: r.covers_document,
+            cert_trust: r.cert_trust,
+        }
+    }
+}
+
+#[uniffi::export]
+pub fn sign_pdf_ffi(
+    path: String,
+    output: String,
+    p12_path: String,
+    password: String,
+    name: Option<String>,
+    reason: Option<String>,
+    location: Option<String>,
+    page: Option<u32>,
+    rect: Option<PdfRectFfi>,
+    cancel: Arc<CancelHandle>,
+    progress: Option<Box<dyn ProgressListener>>,
+) -> Result<(), DocsuiteError> {
+    let identity = load_identity_from_p12(Path::new(&p12_path), &password)?;
+    let signer_name = name.clone().unwrap_or_else(|| "Signed".to_owned());
+    let visible = match (page, rect) {
+        (Some(p), Some(r)) => {
+            let stamp = SignatureStamp {
+                name: signer_name,
+                reason: reason.clone().unwrap_or_default(),
+                date: String::new(),
+                image: None,
+            };
+            Some((p, r.into(), stamp))
+        }
+        (None, None) => None,
+        _ => {
+            return Err(DocsuiteError::InvalidInput {
+                detail: "visible sign needs page and rect".into(),
+            });
+        }
+    };
+    let opts = DigitalSignOptions {
+        field_name: "Signature1".to_owned(),
+        sub_filter: PdfSubFilter::Pades,
+        reason,
+        location,
+        contact: name,
+        visible,
+    };
+    let token = token_from(&cancel);
+    let sink = progress_sink(progress);
+    sign_pdf_path(
+        Path::new(&path),
+        Path::new(&output),
+        &identity,
+        &opts,
+        &token,
+        &sink,
+    )?;
+    Ok(())
+}
+
+#[uniffi::export]
+pub fn verify_pdf_ffi(path: String) -> Result<Vec<SignatureReportFfi>, DocsuiteError> {
+    let bytes = std::fs::read(&path).map_err(|e| DocsuiteError::Io {
+        detail: e.to_string(),
+    })?;
+    let reports = verify_pdf_bytes(&bytes)?;
+    Ok(reports.into_iter().map(SignatureReportFfi::from).collect())
 }
 
 uniffi::setup_scaffolding!();

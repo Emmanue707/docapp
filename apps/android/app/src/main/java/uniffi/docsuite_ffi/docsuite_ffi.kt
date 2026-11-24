@@ -787,6 +787,14 @@ internal open class UniffiVTableCallbackInterfaceProgressListener(
 
 
 
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -829,6 +837,8 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_docsuite_ffi_fn_func_detection_model_url(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_docsuite_ffi_fn_func_docx_to_odt(`path`: RustBuffer.ByValue,`out`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_docsuite_ffi_fn_func_extract_text_layer(`path`: RustBuffer.ByValue,`page`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_docsuite_ffi_fn_func_image_to_pdf_ffi(`input`: RustBuffer.ByValue,`output`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -841,6 +851,8 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_docsuite_ffi_fn_func_ocr_image(`path`: RustBuffer.ByValue,`modelsDir`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_docsuite_ffi_fn_func_odt_to_docx(`path`: RustBuffer.ByValue,`out`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_docsuite_ffi_fn_func_page_count(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Int
     fun uniffi_docsuite_ffi_fn_func_pdf_to_docx(`path`: RustBuffer.ByValue,`out`: RustBuffer.ByValue,`editable`: Byte,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -855,12 +867,16 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_docsuite_ffi_fn_func_rotate(`path`: RustBuffer.ByValue,`pages`: RustBuffer.ByValue,`degrees`: Int,`output`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_docsuite_ffi_fn_func_sign_pdf_ffi(`path`: RustBuffer.ByValue,`output`: RustBuffer.ByValue,`p12Path`: RustBuffer.ByValue,`password`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`reason`: RustBuffer.ByValue,`location`: RustBuffer.ByValue,`page`: RustBuffer.ByValue,`rect`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_docsuite_ffi_fn_func_split(`path`: RustBuffer.ByValue,`ranges`: RustBuffer.ByValue,`outdir`: RustBuffer.ByValue,`single`: Byte,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_docsuite_ffi_fn_func_stamp_image(`path`: RustBuffer.ByValue,`page`: Int,`rect`: RustBuffer.ByValue,`imagePath`: RustBuffer.ByValue,`output`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_docsuite_ffi_fn_func_stamp_text(`path`: RustBuffer.ByValue,`page`: Int,`x`: Double,`y`: Double,`size`: Double,`text`: RustBuffer.ByValue,`output`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_docsuite_ffi_fn_func_verify_pdf_ffi(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_docsuite_ffi_fn_func_version(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_docsuite_ffi_fn_func_visible_signature_ffi(`path`: RustBuffer.ByValue,`page`: Int,`rect`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`reason`: RustBuffer.ByValue,`imagePath`: RustBuffer.ByValue,`output`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -989,6 +1005,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_docsuite_ffi_checksum_func_detection_model_url(
     ): Short
+    fun uniffi_docsuite_ffi_checksum_func_docx_to_odt(
+    ): Short
     fun uniffi_docsuite_ffi_checksum_func_extract_text_layer(
     ): Short
     fun uniffi_docsuite_ffi_checksum_func_image_to_pdf_ffi(
@@ -1000,6 +1018,8 @@ internal interface UniffiLib : Library {
     fun uniffi_docsuite_ffi_checksum_func_models_status(
     ): Short
     fun uniffi_docsuite_ffi_checksum_func_ocr_image(
+    ): Short
+    fun uniffi_docsuite_ffi_checksum_func_odt_to_docx(
     ): Short
     fun uniffi_docsuite_ffi_checksum_func_page_count(
     ): Short
@@ -1015,11 +1035,15 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_docsuite_ffi_checksum_func_rotate(
     ): Short
+    fun uniffi_docsuite_ffi_checksum_func_sign_pdf_ffi(
+    ): Short
     fun uniffi_docsuite_ffi_checksum_func_split(
     ): Short
     fun uniffi_docsuite_ffi_checksum_func_stamp_image(
     ): Short
     fun uniffi_docsuite_ffi_checksum_func_stamp_text(
+    ): Short
+    fun uniffi_docsuite_ffi_checksum_func_verify_pdf_ffi(
     ): Short
     fun uniffi_docsuite_ffi_checksum_func_version(
     ): Short
@@ -1066,6 +1090,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_docsuite_ffi_checksum_func_detection_model_url() != 17523.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_docsuite_ffi_checksum_func_docx_to_odt() != 51367.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_docsuite_ffi_checksum_func_extract_text_layer() != 50820.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1082,6 +1109,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_docsuite_ffi_checksum_func_ocr_image() != 23424.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_docsuite_ffi_checksum_func_odt_to_docx() != 237.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_docsuite_ffi_checksum_func_page_count() != 8615.toShort()) {
@@ -1105,6 +1135,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_docsuite_ffi_checksum_func_rotate() != 23694.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_docsuite_ffi_checksum_func_sign_pdf_ffi() != 22042.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_docsuite_ffi_checksum_func_split() != 47564.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1112,6 +1145,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_docsuite_ffi_checksum_func_stamp_text() != 11557.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_docsuite_ffi_checksum_func_verify_pdf_ffi() != 27387.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_docsuite_ffi_checksum_func_version() != 29361.toShort()) {
@@ -1758,6 +1794,54 @@ public object FfiConverterTypePdfRectFfi: FfiConverterRustBuffer<PdfRectFfi> {
 
 
 
+data class SignatureReportFfi (
+    var `signerCn`: kotlin.String, 
+    var `signingTime`: kotlin.String?, 
+    var `digestOk`: kotlin.Boolean, 
+    var `signatureValid`: kotlin.Boolean, 
+    var `coversDocument`: kotlin.Boolean, 
+    var `certTrust`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSignatureReportFfi: FfiConverterRustBuffer<SignatureReportFfi> {
+    override fun read(buf: ByteBuffer): SignatureReportFfi {
+        return SignatureReportFfi(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SignatureReportFfi) = (
+            FfiConverterString.allocationSize(value.`signerCn`) +
+            FfiConverterOptionalString.allocationSize(value.`signingTime`) +
+            FfiConverterBoolean.allocationSize(value.`digestOk`) +
+            FfiConverterBoolean.allocationSize(value.`signatureValid`) +
+            FfiConverterBoolean.allocationSize(value.`coversDocument`) +
+            FfiConverterString.allocationSize(value.`certTrust`)
+    )
+
+    override fun write(value: SignatureReportFfi, buf: ByteBuffer) {
+            FfiConverterString.write(value.`signerCn`, buf)
+            FfiConverterOptionalString.write(value.`signingTime`, buf)
+            FfiConverterBoolean.write(value.`digestOk`, buf)
+            FfiConverterBoolean.write(value.`signatureValid`, buf)
+            FfiConverterBoolean.write(value.`coversDocument`, buf)
+            FfiConverterString.write(value.`certTrust`, buf)
+    }
+}
+
+
+
 
 
 sealed class DocsuiteException: kotlin.Exception() {
@@ -2069,6 +2153,38 @@ public object FfiConverterTypeProgressListener: FfiConverterCallbackInterface<Pr
 /**
  * @suppress
  */
+public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
+    override fun read(buf: ByteBuffer): kotlin.UInt? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterUInt.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.UInt?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterUInt.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.UInt?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterUInt.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?> {
     override fun read(buf: ByteBuffer): kotlin.String? {
         if (buf.get().toInt() == 0) {
@@ -2091,6 +2207,38 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
         } else {
             buf.put(1)
             FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypePdfRectFfi: FfiConverterRustBuffer<PdfRectFfi?> {
+    override fun read(buf: ByteBuffer): PdfRectFfi? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypePdfRectFfi.read(buf)
+    }
+
+    override fun allocationSize(value: PdfRectFfi?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypePdfRectFfi.allocationSize(value)
+        }
+    }
+
+    override fun write(value: PdfRectFfi?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypePdfRectFfi.write(value, buf)
         }
     }
 }
@@ -2182,6 +2330,34 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
         }
     }
 }
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeSignatureReportFfi: FfiConverterRustBuffer<List<SignatureReportFfi>> {
+    override fun read(buf: ByteBuffer): List<SignatureReportFfi> {
+        val len = buf.getInt()
+        return List<SignatureReportFfi>(len) {
+            FfiConverterTypeSignatureReportFfi.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<SignatureReportFfi>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeSignatureReportFfi.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<SignatureReportFfi>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeSignatureReportFfi.write(it, buf)
+        }
+    }
+}
     @Throws(DocsuiteException::class) fun `cropPages`(`path`: kotlin.String, `pages`: List<kotlin.UInt>, `rect`: PdfRectFfi, `expand`: kotlin.Boolean, `output`: kotlin.String, `cancel`: CancelHandle, `progress`: ProgressListener?)
         = 
     uniffiRustCallWithError(DocsuiteException) { _status ->
@@ -2234,6 +2410,15 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
 }
     )
     }
+    
+
+    @Throws(DocsuiteException::class) fun `docxToOdt`(`path`: kotlin.String, `out`: kotlin.String, `cancel`: CancelHandle, `progress`: ProgressListener?)
+        = 
+    uniffiRustCallWithError(DocsuiteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_docsuite_ffi_fn_func_docx_to_odt(
+        FfiConverterString.lower(`path`),FfiConverterString.lower(`out`),FfiConverterTypeCancelHandle.lower(`cancel`),FfiConverterOptionalTypeProgressListener.lower(`progress`),_status)
+}
+    
     
 
     @Throws(DocsuiteException::class) fun `extractTextLayer`(`path`: kotlin.String, `page`: kotlin.UInt): kotlin.String {
@@ -2290,6 +2475,15 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
 }
     )
     }
+    
+
+    @Throws(DocsuiteException::class) fun `odtToDocx`(`path`: kotlin.String, `out`: kotlin.String, `cancel`: CancelHandle, `progress`: ProgressListener?)
+        = 
+    uniffiRustCallWithError(DocsuiteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_docsuite_ffi_fn_func_odt_to_docx(
+        FfiConverterString.lower(`path`),FfiConverterString.lower(`out`),FfiConverterTypeCancelHandle.lower(`cancel`),FfiConverterOptionalTypeProgressListener.lower(`progress`),_status)
+}
+    
     
 
     @Throws(DocsuiteException::class) fun `pageCount`(`path`: kotlin.String): kotlin.UInt {
@@ -2356,6 +2550,15 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
     
     
 
+    @Throws(DocsuiteException::class) fun `signPdfFfi`(`path`: kotlin.String, `output`: kotlin.String, `p12Path`: kotlin.String, `password`: kotlin.String, `name`: kotlin.String?, `reason`: kotlin.String?, `location`: kotlin.String?, `page`: kotlin.UInt?, `rect`: PdfRectFfi?, `cancel`: CancelHandle, `progress`: ProgressListener?)
+        = 
+    uniffiRustCallWithError(DocsuiteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_docsuite_ffi_fn_func_sign_pdf_ffi(
+        FfiConverterString.lower(`path`),FfiConverterString.lower(`output`),FfiConverterString.lower(`p12Path`),FfiConverterString.lower(`password`),FfiConverterOptionalString.lower(`name`),FfiConverterOptionalString.lower(`reason`),FfiConverterOptionalString.lower(`location`),FfiConverterOptionalUInt.lower(`page`),FfiConverterOptionalTypePdfRectFfi.lower(`rect`),FfiConverterTypeCancelHandle.lower(`cancel`),FfiConverterOptionalTypeProgressListener.lower(`progress`),_status)
+}
+    
+    
+
     @Throws(DocsuiteException::class) fun `split`(`path`: kotlin.String, `ranges`: kotlin.String, `outdir`: kotlin.String, `single`: kotlin.Boolean, `cancel`: CancelHandle, `progress`: ProgressListener?)
         = 
     uniffiRustCallWithError(DocsuiteException) { _status ->
@@ -2381,6 +2584,16 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
         FfiConverterString.lower(`path`),FfiConverterUInt.lower(`page`),FfiConverterDouble.lower(`x`),FfiConverterDouble.lower(`y`),FfiConverterDouble.lower(`size`),FfiConverterString.lower(`text`),FfiConverterString.lower(`output`),FfiConverterTypeCancelHandle.lower(`cancel`),FfiConverterOptionalTypeProgressListener.lower(`progress`),_status)
 }
     
+    
+
+    @Throws(DocsuiteException::class) fun `verifyPdfFfi`(`path`: kotlin.String): List<SignatureReportFfi> {
+            return FfiConverterSequenceTypeSignatureReportFfi.lift(
+    uniffiRustCallWithError(DocsuiteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_docsuite_ffi_fn_func_verify_pdf_ffi(
+        FfiConverterString.lower(`path`),_status)
+}
+    )
+    }
     
  fun `version`(): kotlin.String {
             return FfiConverterString.lift(
