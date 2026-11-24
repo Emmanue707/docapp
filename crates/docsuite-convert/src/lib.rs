@@ -1,9 +1,30 @@
+#![allow(clippy::collapsible_if, unused_extern_crates, unused_imports)]
+
+#[macro_use]
+extern crate lopdf;
+
+mod docx;
+mod extract;
+mod fonts;
+mod matrix;
+mod obfuscate;
+mod pdf_word;
+mod types;
+
 use std::fs;
 use std::io::Read;
 use std::path::Path;
+use std::sync::Arc;
 
 use docsuite_core::{CancelToken, Error, ProgressSink, Result};
 use docsuite_pdf::{ImagePageFit, PageRanges, pdf_from_image_file};
+
+pub use pdf_word::pdf_to_docx;
+pub use types::{ExtractedPage, TextRun};
+
+pub trait PageOcr: Send + Sync {
+    fn ocr_page(&self, image: &[u8], width: u32, height: u32) -> Result<Vec<TextRun>>;
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PdfToWordMode {
@@ -12,12 +33,13 @@ pub enum PdfToWordMode {
     Editable,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct PdfToWordOptions {
     pub mode: PdfToWordMode,
     pub embed_fonts: bool,
     pub ocr_scanned: bool,
     pub pages: Option<PageRanges>,
+    pub page_ocr: Option<Arc<dyn PageOcr>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,7 +56,7 @@ pub struct ImageToPdfOptions {
     pub fit: ImagePageFit,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct ConvertOptions {
     pub image: ImageToPdfOptions,
     pub pdf_to_word: PdfToWordOptions,
@@ -90,16 +112,6 @@ pub fn detect_format(path: &Path) -> Result<Format> {
             path.file_name().and_then(|n| n.to_str()).unwrap_or("file")
         ))
     })
-}
-
-pub fn pdf_to_docx(
-    _input: &Path,
-    _output: &Path,
-    _opts: &PdfToWordOptions,
-    _cancel: &CancelToken,
-    _progress: &Option<ProgressSink>,
-) -> Result<()> {
-    Err(Error::Unsupported("pdf_to_docx not implemented".to_owned()))
 }
 
 pub fn odt_to_docx(
@@ -235,3 +247,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[cfg(test)]
+#[path = "pdf_docx_tests.rs"]
+mod pdf_docx_tests;
