@@ -18,6 +18,7 @@ bindgen = ["uniffi/cli"]
 docsuite-core = { path = "../docsuite-core" }
 docsuite-pdf = { path = "../docsuite-pdf" }
 docsuite-ocr = { path = "../docsuite-ocr" }
+docsuite-convert = { path = "../docsuite-convert" }
 uniffi.workspace = true
 thiserror.workspace = true
 

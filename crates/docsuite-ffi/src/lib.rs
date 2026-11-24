@@ -1,6 +1,7 @@
 use std::ffi::c_char;
 use std::path::Path;
 
+use docsuite_convert::{PdfToWordMode, PdfToWordOptions, pdf_to_docx};
 use docsuite_core::Error;
 use docsuite_ocr::{FieldType, predict_type};
 use docsuite_pdf::{PageRanges, Pdf, merge, pdf_info, rotate, split};
@@ -124,6 +125,22 @@ pub fn rotate_document(
     let mut pdf = Pdf::load(&path)?;
     rotate(&mut pdf, &pages, degrees, &cancel, &None)?;
     pdf.save(output)?;
+    Ok(())
+}
+
+#[uniffi::export(name = "pdf_to_docx")]
+pub fn ffi_pdf_to_docx(path: String, out: String, editable: bool) -> Result<(), DocsuiteError> {
+    let cancel = docsuite_core::CancelToken::new();
+    let mode = if editable {
+        PdfToWordMode::Editable
+    } else {
+        PdfToWordMode::ExactLook
+    };
+    let opts = PdfToWordOptions {
+        mode,
+        ..PdfToWordOptions::default()
+    };
+    pdf_to_docx(Path::new(&path), Path::new(&out), &opts, &cancel, &None)?;
     Ok(())
 }
 
