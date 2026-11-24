@@ -18,7 +18,7 @@ typst = ["docsuite-convert/typst"]
 [dependencies]
 docsuite-core = { path = "../docsuite-core" }
 docsuite-pdf = { path = "../docsuite-pdf" }
-docsuite-ocr = { path = "../docsuite-ocr", features = ["ocrs"] }
+docsuite-ocr = { path = "../docsuite-ocr", features = ["ocrs", "htr"] }
 docsuite-convert = { path = "../docsuite-convert" }
 docsuite-models = { path = "../docsuite-models", features = ["download"] }
 clap.workspace = true

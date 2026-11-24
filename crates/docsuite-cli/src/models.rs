@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use docsuite_models::{default_dir, model_paths, status};
+use docsuite_ocr::handwriting_path;
 
 pub fn cmd_models_fetch(dir: &std::path::Path) -> Result<()> {
     docsuite_models::fetch_models(dir).context("fetch models")?;
@@ -9,9 +10,16 @@ pub fn cmd_models_fetch(dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+pub fn cmd_models_fetch_handwriting(dir: &std::path::Path) -> Result<()> {
+    docsuite_models::fetch_handwriting(dir).context("fetch handwriting model")?;
+    println!("handwriting model ready at {}", dir.display());
+    Ok(())
+}
+
 pub fn cmd_models_status(dir: &std::path::Path) -> Result<()> {
     let st = status(dir);
     let (det, rec) = model_paths(dir);
+    let (htr, _) = handwriting_path(dir);
     println!("dir: {}", dir.display());
     println!(
         "detection: {}",
@@ -26,6 +34,13 @@ pub fn cmd_models_status(dir: &std::path::Path) -> Result<()> {
     );
     if st.recognition {
         println!("  {}", rec.display());
+    }
+    println!(
+        "handwriting: {}",
+        if st.handwriting { "present" } else { "missing" }
+    );
+    if st.handwriting {
+        println!("  {}", htr.display());
     }
     Ok(())
 }

@@ -8,7 +8,7 @@ use docsuite_convert::{
     image_to_txt, pdf_to_searchable_pdf, pdf_to_txt,
 };
 use docsuite_core::{CancelToken, ProgressSink};
-use docsuite_ocr::{BBox, Line, OcrsRecognizer, predict_type};
+use docsuite_ocr::{BBox, Line, open_recognizer, predict_type};
 use docsuite_pdf::PageRanges;
 
 use crate::models::models_dir;
@@ -20,14 +20,15 @@ pub struct OcrRunOptions {
     pub pages: Option<String>,
     pub region: Option<String>,
     pub types: bool,
+    pub handwriting: bool,
     pub models_dir: PathBuf,
     pub quiet: bool,
 }
 
-fn build_ocr(dir: &Path) -> Result<Arc<RecognizerPageOcr>> {
-    let rec = OcrsRecognizer::with_dir(dir).map_err(|e| anyhow::anyhow!("{e}"))?;
+fn build_ocr(dir: &Path, handwriting: bool) -> Result<Arc<RecognizerPageOcr>> {
+    let rec = open_recognizer(dir, handwriting).map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(Arc::new(RecognizerPageOcr {
-        recognizer: Arc::new(rec),
+        recognizer: rec,
         highlight_low_confidence: false,
     }))
 }
@@ -45,7 +46,7 @@ fn region_bbox(spec: &str) -> Result<BBox> {
 pub fn cmd_ocr(opts: OcrRunOptions) -> Result<()> {
     let cancel = CancelToken::new();
     let progress = progress_sink(opts.quiet);
-    let ocr = build_ocr(&opts.models_dir)?;
+    let ocr = build_ocr(&opts.models_dir, opts.handwriting)?;
     let fmt = detect_format(&opts.input).map_err(|e| anyhow::anyhow!("{e}"))?;
     match fmt {
         Format::Pdf => run_pdf(&opts, ocr, &cancel, &progress),

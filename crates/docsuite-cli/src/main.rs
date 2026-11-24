@@ -11,7 +11,7 @@ use docsuite_convert::{
     ConvertOptions, ImageToPdfOptions, PdfToWordMode, PdfToWordOptions, RecognizerPageOcr, convert,
 };
 use docsuite_core::CancelToken;
-use docsuite_ocr::OcrsRecognizer;
+use docsuite_ocr::open_recognizer;
 use docsuite_ocr::predict_type;
 use docsuite_pdf::{
     CertKeyType, DigitalSignOptions, ImagePageFit, NewCertParams, PageRanges, Pdf, PdfSubFilter,
@@ -256,6 +256,7 @@ struct ModelsCmd {
 #[derive(Subcommand)]
 enum ModelsSub {
     Fetch,
+    FetchHandwriting,
     Status,
 }
 
@@ -272,6 +273,8 @@ struct OcrCmd {
     types: bool,
     #[arg(long)]
     models_dir: Option<PathBuf>,
+    #[arg(long, help = "Use handwriting recognition model")]
+    handwriting: bool,
     #[command(flatten)]
     force: ForceOpt,
 }
@@ -678,6 +681,7 @@ fn cmd_models(cmd: ModelsCmd) -> Result<()> {
     let dir = models::models_dir(cmd.dir);
     match cmd.command {
         ModelsSub::Fetch => models::cmd_models_fetch(&dir),
+        ModelsSub::FetchHandwriting => models::cmd_models_fetch_handwriting(&dir),
         ModelsSub::Status => models::cmd_models_status(&dir),
     }
 }
@@ -693,6 +697,7 @@ fn cmd_ocr(cmd: OcrCmd, quiet: bool) -> Result<()> {
         pages: cmd.pages,
         region: cmd.region,
         types: cmd.types,
+        handwriting: cmd.handwriting,
         models_dir,
         quiet,
     })
@@ -718,9 +723,9 @@ fn cmd_convert(cmd: ConvertCmd, quiet: bool) -> Result<()> {
     };
     let page_ocr = if cmd.ocr {
         let dir = models::models_dir(cmd.models_dir);
-        let rec = OcrsRecognizer::with_dir(&dir).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let rec = open_recognizer(&dir, false).map_err(|e| anyhow::anyhow!("{e}"))?;
         Some(std::sync::Arc::new(RecognizerPageOcr {
-            recognizer: std::sync::Arc::new(rec),
+            recognizer: rec,
             highlight_low_confidence: false,
         }) as std::sync::Arc<dyn docsuite_convert::PageOcr>)
     } else {

@@ -15,7 +15,7 @@ docsuite-core = { path = "../../crates/docsuite-core" }
 docsuite-viewer = { path = "../../crates/docsuite-viewer", features = ["pdfium"] }
 docsuite-pdf = { path = "../../crates/docsuite-pdf" }
 docsuite-convert = { path = "../../crates/docsuite-convert", features = ["pdfium", "typst"] }
-docsuite-ocr = { path = "../../crates/docsuite-ocr", features = ["ocrs"] }
+docsuite-ocr = { path = "../../crates/docsuite-ocr", features = ["ocrs", "htr"] }
 docsuite-models = { path = "../../crates/docsuite-models", features = ["download"] }
 eframe.workspace = true
 rfd.workspace = true

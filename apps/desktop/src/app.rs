@@ -42,6 +42,8 @@ pub struct DocApp {
     tool_message: String,
     models_dir: PathBuf,
     models_missing: bool,
+    handwriting_enabled: bool,
+    handwriting_missing: bool,
     recent: Vec<PathBuf>,
     panning: bool,
     space_pan: bool,
@@ -56,7 +58,9 @@ pub struct DocApp {
 impl Default for DocApp {
     fn default() -> Self {
         let models_dir = docsuite_models::default_dir();
-        let models_missing = !docsuite_models::status(&models_dir).ready();
+        let st = docsuite_models::status(&models_dir);
+        let models_missing = !st.ready();
+        let handwriting_missing = !st.handwriting;
         Self {
             runner: JobRunner::builder().workers(2).build(),
             progress: Arc::new(std::sync::Mutex::new(None)),
@@ -90,6 +94,8 @@ impl Default for DocApp {
             tool_message: String::new(),
             models_dir,
             models_missing,
+            handwriting_enabled: false,
+            handwriting_missing,
             recent: load_recent(),
             panning: false,
             space_pan: false,
@@ -105,7 +111,9 @@ impl Default for DocApp {
 
 impl DocApp {
     fn sync_models(&mut self) {
-        self.models_missing = !docsuite_models::status(&self.models_dir).ready();
+        let st = docsuite_models::status(&self.models_dir);
+        self.models_missing = !st.ready();
+        self.handwriting_missing = !st.handwriting;
     }
 
     fn open_path(&mut self, path: PathBuf) {
@@ -632,8 +640,19 @@ impl eframe::App for DocApp {
                                 docsuite_models::fetch_models(&dir).map_err(|e| e.to_string())
                             });
                         }
-                    } else if ui.button("Make searchable PDF").clicked() {
-                        self.ocr_searchable();
+                    } else {
+                        ui.checkbox(&mut self.handwriting_enabled, "Handwriting");
+                        if self.handwriting_enabled && self.handwriting_missing {
+                            if ui.button("Download handwriting model (12 MB)").clicked() {
+                                let dir = self.models_dir.clone();
+                                self.run_bg("handwriting-model", move |_cancel, _progress| {
+                                    docsuite_models::fetch_handwriting(&dir)
+                                        .map_err(|e| e.to_string())
+                                });
+                            }
+                        } else if ui.button("Make searchable PDF").clicked() {
+                            self.ocr_searchable();
+                        }
                     }
                 });
                 ui.separator();
@@ -960,10 +979,12 @@ impl DocApp {
         };
         let out = input.with_extension("searchable.pdf");
         let dir = self.models_dir.clone();
+        let handwriting = self.handwriting_enabled;
         self.run_bg("ocr", move |cancel, progress| {
-            let rec = docsuite_ocr::OcrsRecognizer::with_dir(&dir).map_err(|e| e.to_string())?;
+            let rec =
+                docsuite_ocr::open_recognizer(&dir, handwriting).map_err(|e| e.to_string())?;
             let ocr = std::sync::Arc::new(docsuite_convert::RecognizerPageOcr {
-                recognizer: std::sync::Arc::new(rec),
+                recognizer: rec,
                 highlight_low_confidence: false,
             });
             let opts = docsuite_convert::PdfTextOptions {
