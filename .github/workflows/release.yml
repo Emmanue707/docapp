@@ -22,7 +22,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config clang libssl-dev \
-            libxkbcommon-dev libasound2-dev libwayland-dev libX11-dev
+            libxkbcommon-dev libasound2-dev libwayland-dev libx11-dev
       - uses: dtolnay/rust-toolchain@stable
       - name: pdfium
         env:
