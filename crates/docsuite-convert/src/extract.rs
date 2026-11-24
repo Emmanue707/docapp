@@ -12,10 +12,20 @@ use crate::types::{
 };
 
 #[derive(Clone)]
+enum PaintSpace {
+    Gray,
+    Rgb,
+    Cmyk,
+    Indexed(Vec<(f64, f64, f64)>),
+}
+
+#[derive(Clone)]
 struct GfxState {
     ctm: Matrix,
     fill_rgb: (f64, f64, f64),
     stroke_rgb: (f64, f64, f64),
+    fill_space: PaintSpace,
+    stroke_space: PaintSpace,
     line_width: f64,
     tm: Matrix,
     text_line_y: f64,
@@ -34,6 +44,8 @@ impl GfxState {
             ctm: Matrix::IDENTITY,
             fill_rgb: (0.0, 0.0, 0.0),
             stroke_rgb: (0.0, 0.0, 0.0),
+            fill_space: PaintSpace::Rgb,
+            stroke_space: PaintSpace::Rgb,
             line_width: 1.0,
             tm: Matrix::IDENTITY,
             text_line_y: 0.0,
@@ -49,6 +61,7 @@ impl GfxState {
 }
 
 struct ExtractCtx {
+    page_w: f64,
     page_h: f64,
     text: Vec<TextLine>,
     images: Vec<PlacedImage>,
@@ -82,6 +95,7 @@ pub fn extract_page(doc: &Document, page_id: ObjectId) -> Result<ExtractedPage> 
     let (width, height) = page_size(cropbox, rotate);
     let fonts = load_page_fonts(doc, &page)?;
     let mut ctx = ExtractCtx {
+        page_w: width,
         page_h: height,
         text: Vec::new(),
         images: Vec::new(),
@@ -240,24 +254,46 @@ fn interpret_ops(
                 }
             }
             "rg" => {
+                gs.fill_space = PaintSpace::Rgb;
                 gs.fill_rgb = rgb_ops(&op.operands);
             }
             "RG" => {
+                gs.stroke_space = PaintSpace::Rgb;
                 gs.stroke_rgb = rgb_ops(&op.operands);
             }
             "g" => {
+                gs.fill_space = PaintSpace::Gray;
                 let v = op_num(&op.operands, 0).unwrap_or(0.0);
                 gs.fill_rgb = (v, v, v);
             }
             "G" => {
+                gs.stroke_space = PaintSpace::Gray;
                 let v = op_num(&op.operands, 0).unwrap_or(0.0);
                 gs.stroke_rgb = (v, v, v);
             }
             "k" => {
+                gs.fill_space = PaintSpace::Cmyk;
                 gs.fill_rgb = cmyk_ops(&op.operands);
             }
             "K" => {
+                gs.stroke_space = PaintSpace::Cmyk;
                 gs.stroke_rgb = cmyk_ops(&op.operands);
+            }
+            "cs" => {
+                if let Some(space) = resolve_paint_space(doc, &op.operands) {
+                    gs.fill_space = space;
+                }
+            }
+            "CS" => {
+                if let Some(space) = resolve_paint_space(doc, &op.operands) {
+                    gs.stroke_space = space;
+                }
+            }
+            "sc" | "scn" => {
+                gs.fill_rgb = paint_from_ops(&gs.fill_space, &op.operands);
+            }
+            "SC" | "SCN" => {
+                gs.stroke_rgb = paint_from_ops(&gs.stroke_space, &op.operands);
             }
             "BT" => {
                 gs.tm = Matrix::IDENTITY;
@@ -295,7 +331,7 @@ fn interpret_ops(
                     gs.tm = Matrix::translate(0.0, -gs.text_line_y).concat(gs.tm);
                 }
                 if let Some(bytes) = op_string(&op.operands, 0) {
-                    show_string(doc, ctx, gs, &bytes, 0.0)?;
+                    show_string(ctx, gs, &bytes, 0.0)?;
                 }
             }
             "\"" => {
@@ -305,7 +341,7 @@ fn interpret_ops(
                 gs.char_space = ac;
                 gs.tm = Matrix::translate(0.0, -gs.text_line_y).concat(gs.tm);
                 if let Some(bytes) = op_string(&op.operands, 2) {
-                    show_string(doc, ctx, gs, &bytes, 0.0)?;
+                    show_string(ctx, gs, &bytes, 0.0)?;
                 }
             }
             "TJ" => {
@@ -314,15 +350,12 @@ fn interpret_ops(
                     for item in arr {
                         match item {
                             Object::String(bytes, _) => {
-                                show_string(doc, ctx, gs, bytes, offset)?;
+                                show_string(ctx, gs, bytes, offset)?;
                                 offset = 0.0;
                             }
                             Object::Integer(_) | Object::Real(_) => {
                                 let adj = object_num(item).unwrap_or(0.0);
-                                let font = gs.fonts.get(&gs.font_key);
-                                let scale =
-                                    font.map(|f| f.glyph_width(0, gs.font_size)).unwrap_or(1.0);
-                                offset -= adj / 1000.0 * gs.font_size / scale.max(0.001);
+                                offset -= adj / 1000.0;
                             }
                             _ => {}
                         }
@@ -339,23 +372,27 @@ fn interpret_ops(
                 let y = op_num(&op.operands, 1).unwrap_or(0.0);
                 let w = op_num(&op.operands, 2).unwrap_or(0.0);
                 let h = op_num(&op.operands, 3).unwrap_or(0.0);
-                let p0 = transform(gs, x, y);
-                let p1 = transform(gs, x + w, y);
-                let p2 = transform(gs, x + w, y + h);
-                let p3 = transform(gs, x, y + h);
-                let segs = vec![
-                    PathSegment::MoveTo(p0),
-                    PathSegment::LineTo(p1),
-                    PathSegment::LineTo(p2),
-                    PathSegment::LineTo(p3),
-                    PathSegment::Close,
-                ];
-                store_fill_path(ctx, gs, segs);
+                let p0 = transform(ctx, gs, x, y);
+                let p1 = transform(ctx, gs, x + w, y);
+                let p2 = transform(ctx, gs, x + w, y + h);
+                let p3 = transform(ctx, gs, x, y + h);
+                ctx.current_path.push(PathSegment::MoveTo(p0));
+                ctx.current_path.push(PathSegment::LineTo(p1));
+                ctx.current_path.push(PathSegment::LineTo(p2));
+                ctx.current_path.push(PathSegment::LineTo(p3));
+                ctx.current_path.push(PathSegment::Close);
+                ctx.path_start = Some(p0);
+                ctx.cur_point = Some(p3);
+            }
+            "W" | "W*" => {
+                ctx.current_path.clear();
+                ctx.path_start = None;
+                ctx.cur_point = None;
             }
             "m" => {
                 let x = op_num(&op.operands, 0).unwrap_or(0.0);
                 let y = op_num(&op.operands, 1).unwrap_or(0.0);
-                let p = transform(gs, x, y);
+                let p = transform(ctx, gs, x, y);
                 ctx.current_path.push(PathSegment::MoveTo(p));
                 ctx.cur_point = Some(p);
                 ctx.path_start = Some(p);
@@ -363,7 +400,7 @@ fn interpret_ops(
             "l" => {
                 let x = op_num(&op.operands, 0).unwrap_or(0.0);
                 let y = op_num(&op.operands, 1).unwrap_or(0.0);
-                let p = transform(gs, x, y);
+                let p = transform(ctx, gs, x, y);
                 ctx.current_path.push(PathSegment::LineTo(p));
                 ctx.cur_point = Some(p);
             }
@@ -416,11 +453,16 @@ fn store_fill_path(ctx: &mut ExtractCtx, gs: &GfxState, path: Vec<PathSegment>) 
     if path.is_empty() {
         return;
     }
-    let fill = Some(RgbColor::from_pdf_rgb(
-        gs.fill_rgb.0,
-        gs.fill_rgb.1,
-        gs.fill_rgb.2,
-    ));
+    let rgb = gs.fill_rgb;
+    if rgb.0 > 0.99 && rgb.1 > 0.99 && rgb.2 > 0.99 {
+        let (min_x, min_y, w, h) = path_bounds_segments(&path);
+        if w >= ctx.page_w * 0.9 && h >= ctx.page_h * 0.9 {
+            return;
+        }
+        let _ = min_x;
+        let _ = min_y;
+    }
+    let fill = Some(RgbColor::from_pdf_rgb(rgb.0, rgb.1, rgb.2));
     ctx.vectors.push(VectorPath {
         segments: path,
         fill,
@@ -429,55 +471,94 @@ fn store_fill_path(ctx: &mut ExtractCtx, gs: &GfxState, path: Vec<PathSegment>) 
     });
 }
 
-fn transform(gs: &GfxState, x: f64, y: f64) -> PathPoint {
-    let (ux, uy) = gs.ctm.transform(x, y);
-    PathPoint { x: ux, y: uy }
+fn path_bounds_segments(path: &[PathSegment]) -> (f64, f64, f64, f64) {
+    let mut min_x = f64::MAX;
+    let mut min_y = f64::MAX;
+    let mut max_x = f64::MIN;
+    let mut max_y = f64::MIN;
+    for seg in path {
+        let pts = match seg {
+            PathSegment::MoveTo(p) | PathSegment::LineTo(p) => vec![*p],
+            PathSegment::CurveTo(a, b, c) => vec![*a, *b, *c],
+            PathSegment::Close => continue,
+        };
+        for p in pts {
+            min_x = min_x.min(p.x);
+            min_y = min_y.min(p.y);
+            max_x = max_x.max(p.x);
+            max_y = max_y.max(p.y);
+        }
+    }
+    if min_x == f64::MAX {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    (
+        min_x,
+        min_y,
+        (max_x - min_x).max(0.0),
+        (max_y - min_y).max(0.0),
+    )
 }
 
-fn show_string(
-    _doc: &Document,
-    ctx: &mut ExtractCtx,
-    gs: &mut GfxState,
-    bytes: &[u8],
-    x_offset: f64,
-) -> Result<()> {
+fn transform(ctx: &ExtractCtx, gs: &GfxState, x: f64, y: f64) -> PathPoint {
+    let (ux, uy) = gs.ctm.transform(x, y);
+    let (tx, ty) = ctx.pdf_y_to_top(ux, uy);
+    PathPoint { x: tx, y: ty }
+}
+
+fn show_string(ctx: &mut ExtractCtx, gs: &mut GfxState, bytes: &[u8], x_offset: f64) -> Result<()> {
     if bytes.is_empty() {
         return Ok(());
     }
     let font = match gs.fonts.get(&gs.font_key) {
-        Some(f) => f,
+        Some(f) => f.clone(),
         None => return Ok(()),
     };
-    let text = font.decode_string(bytes);
-    if text.is_empty() {
-        return Ok(());
-    }
-    let text_matrix = gs.tm;
-    let combined = text_matrix.concat(gs.ctm);
-    let (mut x, y) = combined.transform(0.0, 0.0);
-    x += x_offset;
-    let font_size = gs.font_size * combined.scale_x();
-    let width = font.string_width(bytes, font_size);
-    let (top_x, top_y) = ctx.pdf_y_to_top(x, y);
-    let ascent = font.ascent_pt(font_size);
     let hidden = gs.render_mode == 3;
-    let run = TextRun {
-        text,
-        x: top_x,
-        y: top_y - ascent,
-        width,
-        font_size,
-        font_key: gs.font_key.clone(),
-        font_family: font.display_family().to_owned(),
-        bold: font.bold,
-        italic: font.italic,
-        color: RgbColor::from_pdf_rgb(gs.fill_rgb.0, gs.fill_rgb.1, gs.fill_rgb.2),
-        char_spacing: gs.char_space,
-        hidden,
-    };
-    ctx.push_text_run(run);
-    let adv = width / gs.font_size.max(0.001);
-    gs.tm = Matrix::translate(adv, 0.0).concat(gs.tm);
+    let color = RgbColor::from_pdf_rgb(gs.fill_rgb.0, gs.fill_rgb.1, gs.fill_rgb.2);
+    let hz = gs.h_scale / 100.0;
+    let mut i = 0usize;
+    let mut tj_extra = x_offset;
+    while i < bytes.len() {
+        let (glyph, step) = if font.is_cid_font() && i + 1 < bytes.len() {
+            (&bytes[i..i + 2], 2)
+        } else {
+            (&bytes[i..i + 1], 1)
+        };
+        i += step;
+        let text = font.decode_glyph(glyph);
+        if text.is_empty() && !hidden {
+            continue;
+        }
+        let combined = gs.tm.concat(gs.ctm);
+        let (ux, uy) = combined.transform(tj_extra, 0.0);
+        tj_extra = 0.0;
+        let font_size = gs.font_size * combined.scale_x() * hz;
+        let w_em = font.glyph_width_em(glyph);
+        let gw = w_em / 1000.0 * font_size;
+        let (top_x, top_y) = ctx.pdf_y_to_top(ux, uy);
+        let ascent = font.ascent_pt(font_size);
+        ctx.push_text_run(TextRun {
+            text,
+            x: top_x,
+            y: top_y - ascent,
+            width: gw,
+            font_size,
+            font_key: gs.font_key.clone(),
+            font_family: font.display_family().to_owned(),
+            bold: font.bold,
+            italic: font.italic,
+            color,
+            char_spacing: gs.char_space,
+            hidden,
+        });
+        let mut adv = w_em / 1000.0 * hz + gs.char_space;
+        let is_space = !font.is_cid_font() && glyph.first() == Some(&32);
+        if is_space {
+            adv += gs.word_space;
+        }
+        gs.tm = Matrix::translate(adv, 0.0).concat(gs.tm);
+    }
     Ok(())
 }
 
@@ -518,13 +599,28 @@ fn handle_xobject(
         if let Some(img) = decode_image_stream(&stream)? {
             let (w, h) = image_size(&stream.dict)?;
             let m = gs.ctm;
-            let (x0, y0) = m.transform(0.0, 0.0);
-            let (x1, y1) = m.transform(w, 0.0);
-            let (x2, y2) = m.transform(0.0, h);
-            let min_x = x0.min(x1).min(x2);
-            let max_x = x0.max(x1).max(x2);
-            let min_y = y0.min(y1).min(y2);
-            let max_y = y0.max(y1).max(y2);
+            let corners = [
+                m.transform(0.0, 0.0),
+                m.transform(w, 0.0),
+                m.transform(0.0, h),
+                m.transform(w, h),
+            ];
+            let min_x = corners
+                .iter()
+                .map(|(x, _)| *x)
+                .fold(f64::INFINITY, f64::min);
+            let max_x = corners
+                .iter()
+                .map(|(x, _)| *x)
+                .fold(f64::NEG_INFINITY, f64::max);
+            let min_y = corners
+                .iter()
+                .map(|(_, y)| *y)
+                .fold(f64::INFINITY, f64::min);
+            let max_y = corners
+                .iter()
+                .map(|(_, y)| *y)
+                .fold(f64::NEG_INFINITY, f64::max);
             let (tx, ty) = ctx.pdf_y_to_top(min_x, max_y);
             ctx.images.push(PlacedImage {
                 bytes: img.0,
@@ -654,6 +750,24 @@ fn dict_int(dict: &lopdf::Dictionary, key: &[u8]) -> i64 {
         .unwrap_or(0)
 }
 
+fn gap_needs_space(last: &TextRun, run: &TextRun, gap: f64, size: f64) -> bool {
+    if gap > size * 0.06 {
+        return true;
+    }
+    if gap <= size * 0.015 {
+        return false;
+    }
+    let la = last.text.chars().last();
+    let rb = run.text.chars().next();
+    match (la, rb) {
+        (Some(a), Some(b)) if a.is_ascii_digit() && b.is_ascii_alphabetic() => true,
+        (Some(a), Some(b)) if a.is_ascii_alphabetic() && b.is_ascii_digit() => true,
+        (Some('•' | '*' | '-' | '·'), Some(_)) => true,
+        (Some(a), Some(b)) if a.is_alphanumeric() && b.is_alphanumeric() => gap > size * 0.02,
+        _ => gap > size * 0.035,
+    }
+}
+
 fn line_baseline(line: &[TextRun]) -> f64 {
     line.first().map(|r| r.y).unwrap_or(0.0)
 }
@@ -667,76 +781,66 @@ fn merge_into_lines(raw: &[TextRun], fonts: &HashMap<String, PdfFont>) -> Vec<Te
     if visible.is_empty() {
         return Vec::new();
     }
-    let mut sorted = visible;
-    for run in &mut sorted {
-        let snap = run.font_size * 0.25;
+    let mut work: Vec<TextRun> = visible;
+    for run in &mut work {
+        let snap = run.font_size * 0.15;
         if snap > 0.01 {
             run.y = (run.y / snap).round() * snap;
         }
     }
-    sorted.sort_by(|a, b| {
-        let yc = a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal);
-        if yc != std::cmp::Ordering::Equal {
-            yc
-        } else {
-            a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal)
-        }
-    });
     let mut groups: Vec<Vec<TextRun>> = Vec::new();
-    for run in sorted {
-        let mut placed = false;
-        for group in groups.iter_mut() {
+    for run in work {
+        if let Some(group) = groups.last_mut() {
             let base_y = line_baseline(group);
             let size = group
                 .iter()
                 .map(|r| r.font_size)
                 .fold(0.0f64, f64::max)
                 .max(run.font_size);
-            if (run.y - base_y).abs() > size * 0.25 {
-                continue;
-            }
-            let Some(last) = group.last() else {
-                group.push(run.clone());
-                placed = true;
-                break;
-            };
-            let gap = run.x - (last.x + last.width);
-            if gap > size * 3.0 {
-                continue;
-            }
-            let space_w = fonts
-                .get(&last.font_key)
-                .map(|f| f.space_width(last.font_size))
-                .unwrap_or(last.font_size * 0.25);
-            if gap > size * 0.15 && gap < space_w * 1.5 {
-                let same_style = run.font_key == last.font_key
-                    && (run.font_size - last.font_size).abs() < 0.5
-                    && run.color == last.color
-                    && run.bold == last.bold
-                    && run.italic == last.italic;
-                if same_style {
+            if (run.y - base_y).abs() <= size * 0.35 {
+                let Some(last) = group.last() else {
+                    group.push(run.clone());
+                    continue;
+                };
+                if last.text == "•" || last.text == "*" || last.text == "-" || last.text == "·" {
+                    group.push(run);
+                    continue;
+                }
+                let gap = run.x - (last.x + last.width);
+                let space_w = fonts
+                    .get(&last.font_key)
+                    .map(|f| f.space_width(last.font_size))
+                    .unwrap_or(last.font_size * 0.25);
+                if gap > size * 0.35 {
+                    groups.push(vec![run]);
+                    continue;
+                }
+                if !gap_needs_space(last, &run, gap, size) && gap <= size * 0.06 {
                     let mut merged = last.clone();
-                    merged.text.push(' ');
-                    merged.width += space_w;
                     merged.text.push_str(&run.text);
                     merged.width = run.x + run.width - merged.x;
                     let idx = group.len() - 1;
                     group[idx] = merged;
-                } else {
-                    let mut nr = run.clone();
+                } else if gap <= size * 0.55 {
+                    let mut merged = last.clone();
+                    merged.text.push(' ');
+                    merged.width += space_w.min(gap.max(0.0));
+                    merged.text.push_str(&run.text);
+                    merged.width = run.x + run.width - merged.x;
+                    let idx = group.len() - 1;
+                    group[idx] = merged;
+                } else if gap_needs_space(last, &run, gap, size) {
+                    let mut nr = run;
                     nr.text = format!(" {}", nr.text);
-                    nr.width += space_w;
+                    nr.x -= space_w.min(gap.max(0.0));
                     group.push(nr);
+                } else {
+                    group.push(run);
                 }
-            } else {
-                group.push(run.clone());
+                continue;
             }
-            placed = true;
-            break;
         }
-        if !placed {
-            groups.push(vec![run]);
-        }
+        groups.push(vec![run]);
     }
     let mut lines = Vec::with_capacity(groups.len());
     for runs in groups {
@@ -844,14 +948,126 @@ fn rgb_ops(ops: &[Object]) -> (f64, f64, f64) {
 }
 
 fn cmyk_ops(ops: &[Object]) -> (f64, f64, f64) {
-    let c = op_num(ops, 0).unwrap_or(0.0);
-    let m = op_num(ops, 1).unwrap_or(0.0);
-    let y = op_num(ops, 2).unwrap_or(0.0);
-    let k = op_num(ops, 3).unwrap_or(0.0);
+    cmyk_to_rgb(
+        op_num(ops, 0).unwrap_or(0.0),
+        op_num(ops, 1).unwrap_or(0.0),
+        op_num(ops, 2).unwrap_or(0.0),
+        op_num(ops, 3).unwrap_or(0.0),
+    )
+}
+
+fn cmyk_to_rgb(c: f64, m: f64, y: f64, k: f64) -> (f64, f64, f64) {
     let r = (1.0 - c) * (1.0 - k);
     let g = (1.0 - m) * (1.0 - k);
     let b = (1.0 - y) * (1.0 - k);
     (r, g, b)
+}
+
+fn paint_from_ops(space: &PaintSpace, ops: &[Object]) -> (f64, f64, f64) {
+    match space {
+        PaintSpace::Gray => {
+            let v = op_num(ops, 0).unwrap_or(0.0);
+            (v, v, v)
+        }
+        PaintSpace::Rgb => rgb_ops(ops),
+        PaintSpace::Cmyk => cmyk_ops(ops),
+        PaintSpace::Indexed(palette) => {
+            let idx = op_num(ops, 0).unwrap_or(0.0).round() as usize;
+            palette.get(idx).copied().unwrap_or((0.0, 0.0, 0.0))
+        }
+    }
+}
+
+fn resolve_paint_space(doc: &Document, ops: &[Object]) -> Option<PaintSpace> {
+    let first = ops.first()?;
+    if let Ok(name) = first.as_name() {
+        let n = String::from_utf8_lossy(name);
+        return Some(match n.as_ref() {
+            "DeviceGray" => PaintSpace::Gray,
+            "DeviceRGB" => PaintSpace::Rgb,
+            "DeviceCMYK" => PaintSpace::Cmyk,
+            _ => PaintSpace::Rgb,
+        });
+    }
+    let arr = first.as_array().ok()?;
+    let kind = arr.first().and_then(|o| o.as_name().ok())?;
+    let kind = String::from_utf8_lossy(kind);
+    if kind == "ICCBased" {
+        let n = icc_components(doc, arr.get(1)?)?;
+        return Some(match n {
+            1 => PaintSpace::Gray,
+            3 => PaintSpace::Rgb,
+            4 => PaintSpace::Cmyk,
+            _ => PaintSpace::Rgb,
+        });
+    }
+    if kind == "Indexed" {
+        let base = resolve_paint_space(doc, std::slice::from_ref(arr.get(1)?))?;
+        let palette = indexed_palette(doc, arr.get(2)?, &base)?;
+        return Some(PaintSpace::Indexed(palette));
+    }
+    Some(PaintSpace::Rgb)
+}
+
+fn icc_components(doc: &Document, obj: &Object) -> Option<i64> {
+    let stream = match doc.dereference(obj) {
+        Ok((_, Object::Stream(s))) => s,
+        Err(_) => obj.as_stream().ok()?,
+        Ok(_) => return None,
+    };
+    stream.dict.get(b"N").ok().and_then(|o| o.as_i64().ok())
+}
+
+fn indexed_palette(
+    doc: &Document,
+    obj: &Object,
+    base: &PaintSpace,
+) -> Option<Vec<(f64, f64, f64)>> {
+    let stream = match doc.dereference(obj) {
+        Ok((_, Object::Stream(s))) => s,
+        Err(_) => obj.as_stream().ok()?,
+        Ok(_) => return None,
+    };
+    let hival = stream
+        .dict
+        .get(b"HiVal")
+        .ok()
+        .and_then(|o| o.as_i64().ok())
+        .unwrap_or(255) as usize;
+    let data = stream.decompressed_content().ok()?;
+    let channels = match base {
+        PaintSpace::Gray => 1,
+        PaintSpace::Rgb => 3,
+        PaintSpace::Cmyk => 4,
+        PaintSpace::Indexed(_) => 3,
+    };
+    let mut out = Vec::with_capacity(hival + 1);
+    for i in 0..=hival {
+        let start = i * channels;
+        if start + channels > data.len() {
+            break;
+        }
+        let rgb = match channels {
+            1 => {
+                let v = data[start] as f64 / 255.0;
+                (v, v, v)
+            }
+            3 => (
+                data[start] as f64 / 255.0,
+                data[start + 1] as f64 / 255.0,
+                data[start + 2] as f64 / 255.0,
+            ),
+            4 => cmyk_to_rgb(
+                data[start] as f64 / 255.0,
+                data[start + 1] as f64 / 255.0,
+                data[start + 2] as f64 / 255.0,
+                data[start + 3] as f64 / 255.0,
+            ),
+            _ => (0.0, 0.0, 0.0),
+        };
+        out.push(rgb);
+    }
+    Some(out)
 }
 
 pub fn collect_fonts(
