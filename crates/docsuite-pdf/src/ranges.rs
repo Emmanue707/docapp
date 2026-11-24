@@ -94,6 +94,35 @@ impl PageRanges {
         Ok(pages)
     }
 
+    pub fn segments(&self) -> &[(u32, Option<u32>)] {
+        &self.segments
+    }
+
+    pub fn from_segments(segments: Vec<(u32, Option<u32>)>) -> Self {
+        Self { segments }
+    }
+
+    pub fn parse_groups(input: &str) -> Result<Vec<Self>> {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return Err(Error::InvalidInput("empty page range".to_owned()));
+        }
+        if trimmed.eq_ignore_ascii_case("all") {
+            return Ok(vec![Self {
+                segments: vec![(1, None)],
+            }]);
+        }
+        let mut groups = Vec::new();
+        for part in trimmed.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                return Err(Error::InvalidInput(format!("empty segment in '{input}'")));
+            }
+            groups.push(Self::parse(part)?);
+        }
+        Ok(groups)
+    }
+
     pub fn single_pages(&self, page_count: u32) -> Result<Vec<Vec<u32>>> {
         let pages = self.pages(page_count)?;
         let mut groups = Vec::new();
@@ -124,6 +153,14 @@ mod tests {
         assert_eq!(all.pages(3).unwrap(), vec![1, 2, 3]);
         let r = PageRanges::parse("1-3,5,7-").unwrap();
         assert_eq!(r.pages(10).unwrap(), vec![1, 2, 3, 5, 7, 8, 9, 10]);
+    }
+
+    #[test]
+    fn parse_groups_splits_on_commas() {
+        let g = PageRanges::parse_groups("1-3,5").unwrap();
+        assert_eq!(g.len(), 2);
+        assert_eq!(g[0].pages(10).unwrap(), vec![1, 2, 3]);
+        assert_eq!(g[1].pages(10).unwrap(), vec![5]);
     }
 
     #[test]

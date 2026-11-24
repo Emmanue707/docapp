@@ -7,7 +7,7 @@ mod image_pdf;
 mod info;
 mod lopdf_map;
 mod merge;
-mod page_attr;
+pub mod page_attr;
 mod pdf;
 mod progress;
 mod prune;
