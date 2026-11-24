@@ -10,7 +10,25 @@ use zip::write::SimpleFileOptions;
 
 use crate::PdfToWordMode;
 use crate::obfuscate::{font_guid_key, obfuscate_font};
-use crate::types::{ExtractedPage, FontEmbed, ImageKind, PlacedImage, TextRun, VectorPath};
+use crate::types::{
+    ExtractedPage, FontEmbed, ImageKind, PlacedImage, TextLine, TextRun, VectorPath,
+};
+
+struct DocPrGen {
+    next: u32,
+}
+
+impl DocPrGen {
+    fn new() -> Self {
+        Self { next: 1 }
+    }
+
+    fn alloc(&mut self) -> u32 {
+        let id = self.next;
+        self.next += 1;
+        id
+    }
+}
 
 const EMU_PER_PT: i64 = 12700;
 const TWIPS_PER_PT: i64 = 20;
@@ -130,15 +148,16 @@ fn write_document(
     fonts: &[FontEmbed],
 ) -> Result<()> {
     let mut body = String::new();
+    let mut ids = DocPrGen::new();
     match mode {
         PdfToWordMode::ExactLook => {
             for (pi, page) in pages.iter().enumerate() {
-                body.push_str(&exact_page_body(page, pi));
+                body.push_str(&exact_page_body(page, pi, &mut ids));
             }
         }
         PdfToWordMode::Editable => {
             for (pi, page) in pages.iter().enumerate() {
-                body.push_str(&editable_page_body(page, pi));
+                body.push_str(&editable_page_body(page, pi, &mut ids));
                 if pi + 1 < pages.len() {
                     body.push_str(r#"<w:p><w:r><w:br w:type="page"/></w:r></w:p>"#);
                 }
@@ -154,8 +173,9 @@ fn write_document(
  xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
  xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"
  xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
- mc:Ignorable="wps">
+ mc:Ignorable="wps w14 wp14">
 <w:body>{body}</w:body>
 </w:document>"#
     );
@@ -165,26 +185,28 @@ fn write_document(
     Ok(())
 }
 
-fn exact_page_body(page: &ExtractedPage, page_index: usize) -> String {
+fn exact_page_body(page: &ExtractedPage, page_index: usize, ids: &mut DocPrGen) -> String {
     let mut out = String::new();
     let w_twips = (page.width * TWIPS_PER_PT as f64) as i64;
     let h_twips = (page.height * TWIPS_PER_PT as f64) as i64;
-    let pg_sz = if page.width > page.height {
+    let pg_sz = if page.rotate == 90 || page.rotate == 270 {
+        format!(r#"<w:pgSz w:w="{h_twips}" w:h="{w_twips}" w:orient="landscape"/>"#)
+    } else if page.width > page.height {
         format!(r#"<w:pgSz w:w="{w_twips}" w:h="{h_twips}" w:orient="landscape"/>"#)
     } else {
         format!(r#"<w:pgSz w:w="{w_twips}" w:h="{h_twips}"/>"#)
     };
     let mut z: u32 = 0;
     for vp in &page.vectors {
-        out.push_str(&vector_anchor(vp, page_index, z));
+        out.push_str(&vector_anchor(vp, ids, z));
         z += 1;
     }
     for (ii, img) in page.images.iter().enumerate() {
-        out.push_str(&image_anchor(img, page_index, ii, z + 100));
+        out.push_str(&image_anchor(img, page_index, ii, ids, z + 100));
         z += 1;
     }
-    for (ti, run) in page.text.iter().enumerate() {
-        out.push_str(&text_anchor(run, page_index, ti, z + 1000));
+    for line in &page.text {
+        out.push_str(&text_line_anchor(line, ids, z + 1000));
     }
     out.push_str(&format!(
         r#"<w:sectPr>{pg_sz}<w:pgMar w:top="0" w:right="0" w:bottom="0" w:left="0" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>"#
@@ -196,54 +218,78 @@ fn pt_to_emu(v: f64) -> i64 {
     (v * EMU_PER_PT as f64).round() as i64
 }
 
-fn text_anchor(run: &TextRun, _pi: usize, ti: usize, z: u32) -> String {
-    let x = pt_to_emu(run.x);
-    let y = pt_to_emu(run.y);
-    let w = pt_to_emu(run.width + run.font_size * 0.2);
-    let h = pt_to_emu(run.font_size * 1.2);
+fn run_xml(run: &TextRun) -> String {
     let sz = (run.font_size * 2.0).round() as i64;
     let color = run.color.hex();
     let b = if run.bold { r#"<w:b/>"# } else { "" };
     let i = if run.italic { r#"<w:i/>"# } else { "" };
-    let family = escape_xml(&run.font_key);
+    let family = escape_xml(&run.font_family);
     let text = escape_xml(&run.text);
+    let preserve = if run.text.starts_with(' ') || run.text.ends_with(' ') {
+        r#" xml:space="preserve""#
+    } else {
+        ""
+    };
     format!(
-        r#"<w:p><w:r><w:alternateContent><w:choice Requires="wps"><w:drawing>
-<wp:anchor behindDoc="0" distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="{z}" locked="0" layoutInCell="0" allowOverlap="1">
+        r#"<w:r><w:rPr><w:rFonts w:ascii="{family}" w:hAnsi="{family}"/><w:sz w:val="{sz}"/><w:color w:val="{color}"/>{b}{i}</w:rPr><w:t{preserve}>{text}</w:t></w:r>"#
+    )
+}
+
+fn text_line_anchor(line: &TextLine, ids: &mut DocPrGen, z: u32) -> String {
+    let x = pt_to_emu(line.x);
+    let y = pt_to_emu(line.y);
+    let w = pt_to_emu(line.width);
+    let max_size = line
+        .runs
+        .iter()
+        .map(|r| r.font_size)
+        .fold(0.0f64, f64::max)
+        .max(line.height);
+    let h = pt_to_emu(max_size * 1.05);
+    let line_twips = (max_size * TWIPS_PER_PT as f64).round().max(20.0) as i64;
+    let doc_id = ids.alloc();
+    let inner: String = line.runs.iter().map(run_xml).collect();
+    format!(
+        r#"<w:p><w:r><w:drawing>
+<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="{z}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">
 <wp:simplePos x="0" y="0"/>
 <wp:positionH relativeFrom="page"><wp:posOffset>{x}</wp:posOffset></wp:positionH>
 <wp:positionV relativeFrom="page"><wp:posOffset>{y}</wp:posOffset></wp:positionV>
 <wp:extent cx="{w}" cy="{h}"/>
+<wp:effectExtent l="0" t="0" r="0" b="0"/>
 <wp:wrapNone/>
-<wp:docPr id="{ti}" name="Text{ti}"/>
+<wp:docPr id="{doc_id}" name="Text{doc_id}"/>
+<wp:cNvGraphicFramePr/>
 <a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
-<wps:wsp><wps:cNvSpPr/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{w}" cy="{h}"/></a:xfrm><a:prstGeom prst="rect"/></wps:spPr>
-<wps:txbx><w:txbxContent><w:p><w:pPr><w:spacing w:line="{sz}" w:lineRule="exact"/></w:pPr>
-<w:r><w:rPr><w:rFonts w:ascii="{family}" w:hAnsi="{family}"/><w:sz w:val="{sz}"/><w:color w:val="{color}"/>{b}{i}</w:rPr><w:t xml:space="preserve">{text}</w:t></w:r>
-</w:p></w:txbxContent></wps:txbx><wps:bodyPr anchor="t" lIns="0" tIns="0" rIns="0" bIns="0"/></wps:wsp>
+<wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{w}" cy="{h}"/></a:xfrm><a:prstGeom prst="rect"/></wps:spPr>
+<wps:txbx><w:txbxContent><w:p><w:pPr><w:spacing w:line="{line_twips}" w:lineRule="exact"/></w:pPr>{inner}</w:p></w:txbxContent></wps:txbx>
+<wps:bodyPr wrap="none" anchor="t" lIns="0" tIns="0" rIns="0" bIns="0"/></wps:wsp>
 </a:graphicData></a:graphic>
-</wp:anchor></w:drawing></w:choice></w:alternateContent></w:r></w:p>"#
+</wp:anchor></w:drawing></w:r></w:p>"#
     )
 }
 
-fn image_anchor(img: &PlacedImage, pi: usize, ii: usize, z: u32) -> String {
+fn image_anchor(img: &PlacedImage, pi: usize, ii: usize, ids: &mut DocPrGen, z: u32) -> String {
     let x = pt_to_emu(img.x);
     let y = pt_to_emu(img.y);
     let w = pt_to_emu(img.width);
     let h = pt_to_emu(img.height);
     let rid = format!("rIdImg{pi}_{ii}");
+    let doc_id = ids.alloc();
     format!(
         r#"<w:p><w:r><w:drawing>
-<wp:anchor behindDoc="0" distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="{z}" locked="0" layoutInCell="0" allowOverlap="1">
+<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="{z}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">
 <wp:simplePos x="0" y="0"/>
 <wp:positionH relativeFrom="page"><wp:posOffset>{x}</wp:posOffset></wp:positionH>
 <wp:positionV relativeFrom="page"><wp:posOffset>{y}</wp:posOffset></wp:positionV>
 <wp:extent cx="{w}" cy="{h}"/>
+<wp:effectExtent l="0" t="0" r="0" b="0"/>
 <wp:wrapNone/>
-<wp:docPr id="{ii}" name="Image{ii}"/>
+<wp:docPr id="{doc_id}" name="Image{doc_id}"/>
+<wp:cNvGraphicFramePr/>
 <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
-<pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="img"/><pic:cNvPicPr/></pic:nvPicPr>
-<pic:blipFill><a:blip r:embed="{rid}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>
+<pic:pic><pic:nvPicPr><pic:cNvPr id="{doc_id}" name="img{doc_id}"/><pic:cNvPicPr/></pic:nvPicPr>
+<pic:blipFill><a:blip r:embed="{rid}"/>
 <a:stretch><a:fillRect/></a:stretch></pic:blipFill>
 <pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{w}" cy="{h}"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr>
 </pic:pic></a:graphicData></a:graphic>
@@ -251,7 +297,7 @@ fn image_anchor(img: &PlacedImage, pi: usize, ii: usize, z: u32) -> String {
     )
 }
 
-fn vector_anchor(vp: &VectorPath, _idx: usize, z: u32) -> String {
+fn vector_anchor(vp: &VectorPath, ids: &mut DocPrGen, z: u32) -> String {
     let (x, y, w, h) = path_bounds(vp);
     let x_emu = pt_to_emu(x);
     let y_emu = pt_to_emu(y);
@@ -299,15 +345,24 @@ fn vector_anchor(vp: &VectorPath, _idx: usize, z: u32) -> String {
             )
         })
         .unwrap_or_default();
+    let doc_id = ids.alloc();
     format!(
-        r#"<w:p><w:r><w:drawing><wp:anchor behindDoc="1" relativeHeight="{z}" layoutInCell="0" allowOverlap="1">
+        r#"<w:p><w:r><w:drawing>
+<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="{z}" behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1">
+<wp:simplePos x="0" y="0"/>
 <wp:positionH relativeFrom="page"><wp:posOffset>{x_emu}</wp:posOffset></wp:positionH>
 <wp:positionV relativeFrom="page"><wp:posOffset>{y_emu}</wp:posOffset></wp:positionV>
-<wp:extent cx="{w_emu}" cy="{h_emu}"/><wp:wrapNone/>
+<wp:extent cx="{w_emu}" cy="{h_emu}"/>
+<wp:effectExtent l="0" t="0" r="0" b="0"/>
+<wp:wrapNone/>
+<wp:docPr id="{doc_id}" name="Path{doc_id}"/>
+<wp:cNvGraphicFramePr/>
 <a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
-<wps:wsp><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{w_emu}" cy="{h_emu}"/></a:xfrm>
-<a:custGeom>{geom}</a:custGeom>{fill}{stroke}</wps:spPr></wps:wsp>
-</a:graphicData></a:graphic></wp:anchor></w:drawing></w:r></w:p>"#
+<wps:wsp><wps:cNvSpPr/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{w_emu}" cy="{h_emu}"/></a:xfrm>
+<a:custGeom>{geom}</a:custGeom>{fill}{stroke}</wps:spPr>
+<wps:bodyPr lIns="0" tIns="0" rIns="0" bIns="0"/></wps:wsp>
+</a:graphicData></a:graphic>
+</wp:anchor></w:drawing></w:r></w:p>"#
     )
 }
 
@@ -342,35 +397,43 @@ fn path_bounds(vp: &VectorPath) -> (f64, f64, f64, f64) {
     (min_x, min_y, max_x - min_x, max_y - min_y)
 }
 
-fn editable_page_body(page: &ExtractedPage, _pi: usize) -> String {
-    let mut lines: Vec<&TextRun> = page.text.iter().collect();
-    lines.sort_by(|a, b| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal));
+fn editable_page_body(page: &ExtractedPage, pi: usize, ids: &mut DocPrGen) -> String {
     let mut out = String::new();
-    let table = detect_table(&page.vectors, &page.text);
-    if let Some(tbl) = table {
+    if let Some(tbl) = detect_table(page) {
         out.push_str(&tbl);
     } else {
-        let mut para: Vec<&TextRun> = Vec::new();
+        let columns = column_bounds(&page.text, page.width);
+        let mut lines: Vec<&TextLine> = page.text.iter().collect();
+        lines.sort_by(|a, b| {
+            let col_a = column_index(a.x, &columns);
+            let col_b = column_index(b.x, &columns);
+            col_a
+                .cmp(&col_b)
+                .then_with(|| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal))
+                .then_with(|| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        let mut para_lines: Vec<&TextLine> = Vec::new();
         for line in lines {
-            if para.is_empty() {
-                para.push(line);
+            if para_lines.is_empty() {
+                para_lines.push(line);
                 continue;
             }
-            let prev = para.last().copied().unwrap();
-            let same_para = (line.y - prev.y).abs() < prev.font_size * 1.5
-                && (line.x - prev.x).abs() < page.width * 0.05;
-            if same_para {
-                para.push(line);
+            let prev = para_lines.last().copied().unwrap();
+            let size = prev.runs.first().map(|r| r.font_size).unwrap_or(12.0);
+            let y_gap = line.y - prev.y;
+            let same_col = column_index(line.x, &columns) == column_index(prev.x, &columns);
+            if same_col && y_gap > size * 0.35 && y_gap < size * 1.35 {
+                para_lines.push(line);
             } else {
-                out.push_str(&paragraph_xml(&para));
-                para = vec![line];
+                out.push_str(&editable_paragraph(&para_lines));
+                para_lines = vec![line];
             }
         }
-        if !para.is_empty() {
-            out.push_str(&paragraph_xml(&para));
+        if !para_lines.is_empty() {
+            out.push_str(&editable_paragraph(&para_lines));
         }
         for (ii, img) in page.images.iter().enumerate() {
-            out.push_str(&image_inline(img, _pi, ii));
+            out.push_str(&image_anchor(img, pi, ii, ids, 1));
         }
     }
     let w_twips = (page.width * TWIPS_PER_PT as f64) as i64;
@@ -381,65 +444,211 @@ fn editable_page_body(page: &ExtractedPage, _pi: usize) -> String {
     out
 }
 
-fn paragraph_xml(runs: &[&TextRun]) -> String {
+fn column_bounds(lines: &[TextLine], page_width: f64) -> Vec<f64> {
+    let mut xs: Vec<f64> = lines.iter().map(|l| l.x).collect();
+    xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    if xs.len() < 4 {
+        return vec![0.0];
+    }
+    let mut gaps: Vec<(f64, f64)> = Vec::new();
+    for w in xs.windows(2) {
+        let gap = w[1] - w[0];
+        if gap > page_width * 0.08 {
+            gaps.push((gap, (w[0] + w[1]) / 2.0));
+        }
+    }
+    gaps.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    if let Some((_, mid)) = gaps.first() {
+        vec![0.0, *mid]
+    } else {
+        vec![0.0]
+    }
+}
+
+fn column_index(x: f64, bounds: &[f64]) -> usize {
+    let mut col = 0usize;
+    for &b in bounds.iter().skip(1) {
+        if x >= b {
+            col += 1;
+        }
+    }
+    col
+}
+
+fn editable_paragraph(lines: &[&TextLine]) -> String {
+    let mut parts: Vec<TextRun> = Vec::new();
+    let body_size = lines
+        .iter()
+        .flat_map(|l| l.runs.iter())
+        .map(|r| r.font_size)
+        .fold(0.0f64, |a, b| a.max(b));
+    for (i, line) in lines.iter().enumerate() {
+        for run in &line.runs {
+            if let Some(last) = parts.last_mut() {
+                let same_style = last.font_family == run.font_family
+                    && (last.font_size - run.font_size).abs() < 0.5
+                    && last.color == run.color
+                    && last.bold == run.bold
+                    && last.italic == run.italic;
+                if same_style {
+                    last.text.push_str(&run.text);
+                    continue;
+                }
+            }
+            parts.push(run.clone());
+        }
+        if i + 1 < lines.len() {
+            let joined = join_lines(lines[i], lines[i + 1]);
+            if joined {
+                if let Some(last) = parts.last_mut() {
+                    if last.text.ends_with('-') {
+                        last.text = last.text.trim_end_matches('-').to_owned();
+                    }
+                }
+            } else if let Some(last) = parts.last_mut() {
+                if !last.text.ends_with(' ') && !last.text.is_empty() {
+                    last.text.push(' ');
+                }
+            }
+        }
+    }
+    let heading = parts
+        .iter()
+        .any(|r| r.bold && r.font_size > body_size * 1.15)
+        || parts
+            .first()
+            .map(|r| r.font_size > body_size * 1.2)
+            .unwrap_or(false);
+    let bullet = parts
+        .first()
+        .and_then(|r| r.text.chars().next())
+        .map(|c| c == '•' || c == '-' || c == '*')
+        .unwrap_or(false);
+    let mut ppr = String::from(r#"<w:spacing w:after="120" w:line="276" w:lineRule="auto"/>"#);
+    if heading {
+        ppr = String::from(
+            r#"<w:pStyle w:val="Heading1"/><w:spacing w:after="120" w:line="276" w:lineRule="auto"/>"#,
+        );
+    } else if bullet {
+        ppr = String::from(
+            r#"<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr><w:spacing w:after="60" w:line="276" w:lineRule="auto"/>"#,
+        );
+    }
     let mut inner = String::new();
-    for run in runs {
-        let sz = (run.font_size * 2.0).round() as i64;
-        let b = if run.bold { r#"<w:b/>"# } else { "" };
-        let i = if run.italic { r#"<w:i/>"# } else { "" };
-        inner.push_str(&format!(
-            r#"<w:r><w:rPr><w:rFonts w:ascii="{}" w:hAnsi="{}"/><w:sz w:val="{sz}"/><w:color w:val="{}"/>{b}{i}</w:rPr><w:t>{}</w:t></w:r>"#,
-            escape_xml(&run.font_key),
-            escape_xml(&run.font_key),
-            run.color.hex(),
-            escape_xml(&run.text)
-        ));
+    for run in parts {
+        let mut r = run;
+        if bullet && inner.is_empty() {
+            r.text = r.text.trim_start_matches(['•', '-', '*', ' ']).to_owned();
+        }
+        inner.push_str(&run_xml(&r));
     }
-    format!(
-        r#"<w:p><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>{inner}</w:p>"#
-    )
+    format!(r#"<w:p><w:pPr>{ppr}</w:pPr>{inner}</w:p>"#)
 }
 
-fn image_inline(_img: &PlacedImage, _pi: usize, _ii: usize) -> String {
-    String::new()
+fn join_lines(a: &TextLine, b: &TextLine) -> bool {
+    let size = a.runs.first().map(|r| r.font_size).unwrap_or(12.0);
+    (b.y - a.y).abs() < size * 1.8
+        && a.runs
+            .last()
+            .map(|r| r.text.ends_with('-'))
+            .unwrap_or(false)
 }
 
-fn detect_table(vectors: &[VectorPath], text: &[TextRun]) -> Option<String> {
-    let horiz: Vec<_> = vectors.iter().filter(|v| is_h_line(v)).collect();
-    let vert: Vec<_> = vectors.iter().filter(|v| is_v_line(v)).collect();
-    if horiz.len() >= 2 && vert.len() >= 2 && !text.is_empty() {
-        let cell_text = escape_xml(&text[0].text);
-        return Some(format!(
-            r#"<w:tbl><w:tr><w:tc><w:p><w:r><w:t>{cell_text}</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"#
-        ));
+fn detect_table(page: &ExtractedPage) -> Option<String> {
+    let mut h_ys: Vec<f64> = Vec::new();
+    let mut v_xs: Vec<f64> = Vec::new();
+    for v in &page.vectors {
+        if let Some(y) = h_line_y(v) {
+            if !h_ys.iter().any(|hy| (hy - y).abs() < 2.0) {
+                h_ys.push(y);
+            }
+        }
+        if let Some(x) = v_line_x(v) {
+            if !v_xs.iter().any(|vx| (vx - x).abs() < 2.0) {
+                v_xs.push(x);
+            }
+        }
     }
-    None
+    h_ys.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    v_xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    if h_ys.len() < 3 || v_xs.len() < 3 {
+        return None;
+    }
+    let rows = h_ys.len() - 1;
+    let cols = v_xs.len() - 1;
+    if rows < 2 || cols < 2 {
+        return None;
+    }
+    let mut cell_texts: Vec<Vec<String>> = Vec::new();
+    let mut filled = 0usize;
+    for ri in 0..rows {
+        let y0 = h_ys[ri];
+        let y1 = h_ys[ri + 1];
+        let mut row = Vec::new();
+        for ci in 0..cols {
+            let x0 = v_xs[ci];
+            let x1 = v_xs[ci + 1];
+            let cell_text: String = page
+                .text
+                .iter()
+                .filter(|l| {
+                    l.x >= x0 - 2.0 && l.x + l.width <= x1 + 4.0 && l.y >= y0 - 2.0 && l.y <= y1
+                })
+                .flat_map(|l| l.runs.iter().map(|r| r.text.as_str()))
+                .collect::<Vec<_>>()
+                .join(" ")
+                .trim()
+                .to_owned();
+            if !cell_text.is_empty() {
+                filled += 1;
+            }
+            row.push(cell_text);
+        }
+        cell_texts.push(row);
+    }
+    let cells = rows * cols;
+    if filled * 3 < cells {
+        return None;
+    }
+    let mut tbl = String::from(r#"<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/></w:tblPr>"#);
+    for row in &cell_texts {
+        tbl.push_str("<w:tr>");
+        for cell in row {
+            tbl.push_str(&format!(
+                r#"<w:tc><w:p><w:r><w:t>{}</w:t></w:r></w:p></w:tc>"#,
+                escape_xml(cell)
+            ));
+        }
+        tbl.push_str("</w:tr>");
+    }
+    tbl.push_str("</w:tbl>");
+    Some(tbl)
 }
 
-fn is_h_line(v: &VectorPath) -> bool {
+fn h_line_y(v: &VectorPath) -> Option<f64> {
     for w in v.segments.windows(2) {
         if let (crate::types::PathSegment::MoveTo(a), crate::types::PathSegment::LineTo(b)) =
             (&w[0], &w[1])
         {
             if (a.y - b.y).abs() < 1.0 && (a.x - b.x).abs() > 10.0 {
-                return true;
+                return Some((a.y + b.y) / 2.0);
             }
         }
     }
-    false
+    None
 }
 
-fn is_v_line(v: &VectorPath) -> bool {
+fn v_line_x(v: &VectorPath) -> Option<f64> {
     for w in v.segments.windows(2) {
         if let (crate::types::PathSegment::MoveTo(a), crate::types::PathSegment::LineTo(b)) =
             (&w[0], &w[1])
         {
             if (a.x - b.x).abs() < 1.0 && (a.y - b.y).abs() > 10.0 {
-                return true;
+                return Some((a.x + b.x) / 2.0);
             }
         }
     }
-    false
+    None
 }
 
 fn write_document_rels(
@@ -519,7 +728,8 @@ fn write_font_table(
 ) -> Result<()> {
     let mut xml = String::from(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:fonts xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">"#,
+<w:fonts xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">"#,
     );
     for font in fonts {
         let embed = if embed_fonts {
@@ -576,6 +786,9 @@ fn write_app(zip: &mut ZipWriter<std::fs::File>, opts: SimpleFileOptions) -> Res
 pub fn escape_xml(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
+        if !crate::fonts::valid_xml_char(c) {
+            continue;
+        }
         match c {
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
