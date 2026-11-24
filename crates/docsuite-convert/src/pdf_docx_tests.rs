@@ -754,6 +754,127 @@ fn doc_pr_ids_unique_in_document() {
 }
 
 #[test]
+fn a_pdf_spacing_if_present() {
+    let path = std::path::Path::new("/tmp/dx/a.pdf");
+    if !path.exists() {
+        return;
+    }
+    let pdf = docsuite_pdf::Pdf::load(path).unwrap();
+    let doc = pdf.lopdf_document();
+    let page_id = pdf.page_id(1).unwrap();
+    let raw = extract::extract_raw_runs_for_test(doc, page_id).unwrap();
+    let start = raw.iter().position(|r| r.text == "S").unwrap_or(0);
+    let sub_runs: Vec<_> = raw.iter().skip(start).take(50).collect();
+    let mut gaps = Vec::new();
+    for w in sub_runs.windows(2) {
+        let gap = w[1].x - (w[0].x + w[0].width);
+        let step = w[1].x - w[0].x;
+        gaps.push((
+            w[0].text.clone(),
+            w[1].text.clone(),
+            gap,
+            step,
+            w[0].font_size,
+        ));
+    }
+    let page = extract::extract_page(doc, page_id).unwrap();
+    let sample: String = page
+        .text
+        .iter()
+        .take(5)
+        .map(|l| l.runs.iter().map(|r| r.text.as_str()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("|");
+    assert!(
+        !sample.contains("Submissionand")
+            && sample.contains("Submission and")
+            && sample.contains("Formatting"),
+        "got {:?}",
+        sample
+    );
+}
+
+#[test]
+fn gap_space_from_tj_kern() {
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let cmap = Stream::new(
+        dictionary! {},
+        br#"begincmap
+beginbfchar
+<41> <0041>
+<61> <0061>
+endbfchar
+endcmap"#
+            .to_vec(),
+    );
+    let cmap_id = doc.add_object(cmap);
+    let font_id = doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type1",
+        "BaseFont" => "NimbusRomNo9L-Regu",
+        "FirstChar" => 65,
+        "LastChar" => 97,
+        "Widths" => (0..33).map(|_| Object::Integer(600)).collect::<Vec<_>>(),
+        "ToUnicode" => cmap_id,
+    });
+    let resources_id = doc.add_object(dictionary! {
+        "Font" => dictionary! { "F1" => font_id },
+    });
+    let content = Content {
+        operations: vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Td", vec![72.into(), 700.into()]),
+            Operation::new(
+                "TJ",
+                vec![Object::Array(vec![
+                    Object::string_literal("A"),
+                    Object::Integer(-250),
+                    Object::string_literal("a"),
+                ])],
+            ),
+            Operation::new("ET", vec![]),
+        ],
+    };
+    let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "Resources" => resources_id,
+        "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        "Contents" => content_id,
+    });
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        }),
+    );
+    let catalog_id = doc.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+    });
+    doc.trailer.set("Root", catalog_id);
+    let dir = work_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let pdf_path = dir.join("tj.pdf");
+    save_doc(doc, &pdf_path);
+    let pdf = docsuite_pdf::Pdf::load(&pdf_path).unwrap();
+    let page = extract::extract_page(pdf.lopdf_document(), pdf.page_id(1).unwrap()).unwrap();
+    let text: String = page
+        .text
+        .iter()
+        .flat_map(|l| l.runs.iter())
+        .map(|r| r.text.as_str())
+        .collect();
+    assert_eq!(text, "A a");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn office_font_tounicode_decode() {
     let path = std::path::Path::new("/tmp/dx/office.pdf");
     if !path.exists() {
