@@ -1,5 +1,6 @@
 mod models;
 mod ocr_cmd;
+mod render_cmd;
 mod util;
 
 use std::path::{Path, PathBuf};
@@ -46,6 +47,7 @@ enum Commands {
     Convert(ConvertCmd),
     Ocr(OcrCmd),
     Models(ModelsCmd),
+    Render(RenderCmd),
 }
 
 #[derive(Args)]
@@ -219,6 +221,19 @@ struct OcrCmd {
 }
 
 #[derive(Args)]
+struct RenderCmd {
+    input: PathBuf,
+    #[arg(short, long)]
+    output: PathBuf,
+    #[arg(long)]
+    pages: Option<String>,
+    #[arg(long, default_value_t = 150.0)]
+    dpi: f32,
+    #[command(flatten)]
+    force: ForceOpt,
+}
+
+#[derive(Args)]
 struct ConvertCmd {
     input: PathBuf,
     #[arg(short, long)]
@@ -288,7 +303,19 @@ fn main() -> Result<()> {
         Commands::Convert(cmd) => cmd_convert(cmd, cli.quiet),
         Commands::Ocr(cmd) => cmd_ocr(cmd, cli.quiet),
         Commands::Models(cmd) => cmd_models(cmd),
+        Commands::Render(cmd) => cmd_render(cmd, cli.quiet),
     }
+}
+
+fn cmd_render(cmd: RenderCmd, quiet: bool) -> Result<()> {
+    render_cmd::cmd_render(render_cmd::RenderOptions {
+        input: cmd.input,
+        output: cmd.output,
+        pages: cmd.pages,
+        dpi: cmd.dpi,
+        quiet,
+        force: cmd.force.force,
+    })
 }
 
 fn cmd_info(cmd: InfoCmd) -> Result<()> {

@@ -10,15 +10,18 @@ authors.workspace = true
 name = "docapp"
 path = "src/main.rs"
 
+[features]
+default = ["pdfium"]
+pdfium = ["docsuite-convert/pdfium"]
+
 [dependencies]
 docsuite-core = { path = "../docsuite-core" }
 docsuite-pdf = { path = "../docsuite-pdf" }
 docsuite-ocr = { path = "../docsuite-ocr", features = ["ocrs"] }
 docsuite-convert = { path = "../docsuite-convert" }
+docsuite-models = { path = "../docsuite-models", features = ["download"] }
 clap.workspace = true
 anyhow = { workspace = true, features = ["std"] }
-sha2.workspace = true
-ureq.workspace = true
 
 [dev-dependencies]
 lopdf = { workspace = true }
