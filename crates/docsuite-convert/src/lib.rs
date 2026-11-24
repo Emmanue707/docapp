@@ -4,13 +4,15 @@
 extern crate lopdf;
 
 mod docx;
-mod extract;
+pub mod extract;
 mod fonts;
 mod image_ocr;
 mod matrix;
 mod obfuscate;
 mod ocr_util;
 mod page_ocr;
+#[cfg(feature = "pdfium")]
+mod pdf_image;
 mod pdf_text;
 mod pdf_word;
 mod types;
@@ -179,6 +181,10 @@ pub fn odt_to_pdf(
     Err(Error::Unsupported("odt_to_pdf not implemented".to_owned()))
 }
 
+#[cfg(feature = "pdfium")]
+pub use pdf_image::{PdfToImageOptions, pdf_to_image};
+
+#[cfg(not(feature = "pdfium"))]
 pub fn pdf_to_image(
     _input: &Path,
     _output: &Path,
@@ -186,7 +192,7 @@ pub fn pdf_to_image(
     _progress: &Option<ProgressSink>,
 ) -> Result<()> {
     Err(Error::Unsupported(
-        "pdf_to_image not implemented".to_owned(),
+        "pdf_to_image requires the pdfium feature".to_owned(),
     ))
 }
 
@@ -267,7 +273,22 @@ pub fn convert(
         (Format::Docx, Format::Odt) => docx_to_odt(input, output, cancel, progress),
         (Format::Docx, Format::Pdf) => docx_to_pdf(input, output, cancel, progress),
         (Format::Odt, Format::Pdf) => odt_to_pdf(input, output, cancel, progress),
-        (Format::Pdf, Format::Jpeg | Format::Png) => pdf_to_image(input, output, cancel, progress),
+        (Format::Pdf, Format::Jpeg | Format::Png | Format::WebP) => {
+            #[cfg(feature = "pdfium")]
+            {
+                let opts = PdfToImageOptions {
+                    dpi: 150.0,
+                    pages: opts.pdf_to_word.pages.clone(),
+                    format: output_fmt,
+                };
+                pdf_to_image(input, output, &opts, cancel, progress)
+            }
+            #[cfg(not(feature = "pdfium"))]
+            {
+                let _ = output_fmt;
+                pdf_to_image(input, output, cancel, progress)
+            }
+        }
         _ => Err(Error::Unsupported(format!(
             "conversion {:?} -> {:?} is not supported",
             input_fmt, output_fmt
@@ -320,3 +341,4 @@ mod pdf_docx_tests;
 #[cfg(test)]
 #[path = "ocr_tests.rs"]
 mod ocr_tests;
+
