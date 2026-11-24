@@ -108,6 +108,35 @@ pub fn horizontal_projection_lines(image: &GrayImage, min_gap: u32) -> Vec<BBox>
     lines
 }
 
+pub const MAX_OCR_LONG_SIDE: u32 = 3000;
+
+pub fn cap_long_side(image: GrayImage, max_long: u32) -> (GrayImage, f64) {
+    let long = image.width.max(image.height);
+    if long <= max_long {
+        return (image, 1.0);
+    }
+    let scale = max_long as f64 / long as f64;
+    let nw = ((image.width as f64) * scale).round().max(1.0) as u32;
+    let nh = ((image.height as f64) * scale).round().max(1.0) as u32;
+    let mut out = vec![255u8; (nw * nh) as usize];
+    for y in 0..nh {
+        for x in 0..nw {
+            let sx = ((x as f64) / scale).floor() as u32;
+            let sy = ((y as f64) / scale).floor() as u32;
+            out[y as usize * nw as usize + x as usize] =
+                image.get(sx.min(image.width - 1), sy.min(image.height - 1));
+        }
+    }
+    (
+        GrayImage {
+            width: nw,
+            height: nh,
+            pixels: out,
+        },
+        scale,
+    )
+}
+
 pub fn crop_gray(image: &GrayImage, region: BBox) -> GrayImage {
     let x0 = region.x0.floor().max(0.0) as u32;
     let y0 = region.y0.floor().max(0.0) as u32;

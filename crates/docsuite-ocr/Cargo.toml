@@ -6,5 +6,14 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+default = []
+ocrs = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image"]
+
 [dependencies]
 docsuite-core = { path = "../docsuite-core" }
+image = { workspace = true, optional = true }
+ocrs = { workspace = true, optional = true }
+rten = { workspace = true, optional = true }
+rten-imageproc = { workspace = true, optional = true }
+sha2.workspace = true
