@@ -127,20 +127,71 @@ pub fn strip_subset_prefix(name: &str) -> &str {
     name
 }
 
+fn trim_style_suffix(name: &str) -> String {
+    let mut s = name.to_owned();
+    for suffix in [
+        "-BoldItalic",
+        "-Bold",
+        "-Italic",
+        ",BoldItalic",
+        ",Bold",
+        ",Italic",
+        "-BoldItalic",
+        "-Italic",
+        "-Regular",
+    ] {
+        if s.len() > suffix.len() {
+            let tail = &s[s.len() - suffix.len()..];
+            if tail.eq_ignore_ascii_case(suffix) {
+                s.truncate(s.len() - suffix.len());
+                break;
+            }
+        }
+    }
+    if s.ends_with("MT") || s.ends_with("PS") {
+        let t = s.trim_end_matches("MT").trim_end_matches("PS");
+        if !t.is_empty() {
+            s = t.to_owned();
+        }
+    }
+    s
+}
+
 pub fn family_name(base: &str) -> String {
     let stripped = strip_subset_prefix(base);
-    let lower = stripped.to_ascii_lowercase();
-    if lower.contains("helvetica") || lower == "arial" {
-        "Arial".to_owned()
-    } else if lower.contains("times") {
-        "Times New Roman".to_owned()
-    } else if lower.contains("courier") {
-        "Courier New".to_owned()
-    } else if lower == "symbol" {
-        "Symbol".to_owned()
-    } else {
-        stripped.to_owned()
+    let core = trim_style_suffix(stripped);
+    let lower = core.to_ascii_lowercase();
+    if lower.contains("liberationserif")
+        || lower.contains("lmroman")
+        || lower.starts_with("lmr")
+        || lower.starts_with("cmr")
+        || lower.starts_with("cmti")
+        || lower.starts_with("cmmi")
+        || lower.starts_with("cmsy")
+        || lower.contains("nimbusrom")
+        || lower.contains("latinmodernroman")
+    {
+        return "Times New Roman".to_owned();
     }
+    if lower.contains("liberationsans") || lower.contains("lmss") || lower.contains("lmssq") {
+        return "Arial".to_owned();
+    }
+    if lower.contains("liberationmono") || lower.contains("lmmono") || lower.contains("cmtt") {
+        return "Courier New".to_owned();
+    }
+    if lower.contains("helvetica") || lower == "arial" || lower.contains("nimbussan") {
+        return "Arial".to_owned();
+    }
+    if lower.contains("times") || lower.contains("nimbusrom") {
+        return "Times New Roman".to_owned();
+    }
+    if lower.contains("courier") || lower.contains("nimbusmon") {
+        return "Courier New".to_owned();
+    }
+    if lower == "symbol" {
+        return "Symbol".to_owned();
+    }
+    core.to_owned()
 }
 
 pub fn style_from_name(name: &str) -> (bool, bool) {
@@ -148,6 +199,12 @@ pub fn style_from_name(name: &str) -> (bool, bool) {
     let bold = n.contains("bold") || n.contains("-bd") || n.ends_with("bd");
     let italic = n.contains("italic") || n.contains("oblique") || n.contains("-it");
     (bold, italic)
+}
+
+pub fn valid_xml_char(c: char) -> bool {
+    let u = c as u32;
+    matches!(c, '\t' | '\n' | '\r')
+        || (c >= ' ' && c != '\u{FFFE}' && c != '\u{FFFF}' && !(0xD800..=0xDFFF).contains(&u))
 }
 
 #[derive(Clone)]
@@ -163,7 +220,10 @@ pub struct PdfFont {
     to_unicode: HashMap<u32, char>,
     is_cid: bool,
     default_width: f64,
+    ascent_em: f64,
+    space_em: f64,
     ttf: Option<Vec<u8>>,
+    embed_family: Option<String>,
 }
 
 impl PdfFont {
@@ -213,8 +273,8 @@ impl PdfFont {
         }
         if let Ok(tu_ref) = dict.get(b"ToUnicode") {
             let stream_data = match doc.dereference(tu_ref) {
-                Ok((_, Object::Stream(s))) => Some(s.content.clone()),
-                Err(_) => tu_ref.as_stream().ok().map(|s| s.content.clone()),
+                Ok((_, Object::Stream(s))) => tu_stream_bytes(s),
+                Err(_) => tu_ref.as_stream().ok().and_then(tu_stream_bytes),
                 Ok((_, _)) => None,
             };
             if let Some(data) = stream_data {
@@ -223,7 +283,8 @@ impl PdfFont {
         }
         let (first_char, widths) = read_widths(doc, dict)?;
         let encoding = build_encoding(doc, dict, &base)?;
-        let ttf = read_font_file2(doc, dict)?;
+        let (ttf, embed_family) = read_font_file2(doc, dict)?;
+        let (ascent_em, space_em) = read_descriptor_metrics(doc, dict);
         Ok(Self {
             name: base,
             family,
@@ -236,46 +297,75 @@ impl PdfFont {
             to_unicode,
             is_cid,
             default_width: 500.0,
+            ascent_em,
+            space_em,
             ttf,
+            embed_family,
         })
     }
 
+    pub fn display_family(&self) -> &str {
+        self.embed_family.as_deref().unwrap_or(&self.family)
+    }
+
+    pub fn ascent_pt(&self, font_size: f64) -> f64 {
+        font_size * self.ascent_em
+    }
+
+    pub fn space_width(&self, font_size: f64) -> f64 {
+        let em = if self.space_em > 0.0 {
+            self.space_em
+        } else {
+            0.25
+        };
+        em * font_size
+    }
+
     pub fn decode_string(&self, bytes: &[u8]) -> String {
+        let mut out = String::new();
         if self.is_cid && bytes.len() >= 2 {
-            let mut out = String::new();
             let mut i = 0;
             while i + 1 < bytes.len() {
                 let code = u32::from(bytes[i]) * 256 + u32::from(bytes[i + 1]);
+                i += 2;
                 let ch = self
                     .to_unicode
                     .get(&code)
-                    .or_else(|| self.cid_map.get(&code))
-                    .copied()
-                    .unwrap_or('?');
-                out.push(ch);
-                i += 2;
+                    .or_else(|| self.cid_map.get(&code));
+                if let Some(c) = ch {
+                    if valid_xml_char(*c) {
+                        out.push(*c);
+                    }
+                }
             }
             return out;
         }
-        bytes
-            .iter()
-            .map(|&b| {
-                let code = u32::from(b);
-                if let Some(&ch) = self.to_unicode.get(&code) {
-                    return ch;
-                }
+        let to_uni_only = !self.to_unicode.is_empty();
+        for &b in bytes {
+            let code = u32::from(b);
+            let ch = if let Some(&ch) = self.to_unicode.get(&code) {
+                Some(ch)
+            } else if to_uni_only {
+                None
+            } else {
                 let uni = self
                     .encoding
                     .get(b as usize)
                     .copied()
                     .unwrap_or(u16::from(b));
                 if u32::from(uni) <= 0x10FFFF {
-                    char::from_u32(u32::from(uni)).unwrap_or('?')
+                    char::from_u32(u32::from(uni))
                 } else {
-                    '?'
+                    None
                 }
-            })
-            .collect()
+            };
+            if let Some(c) = ch {
+                if valid_xml_char(c) {
+                    out.push(c);
+                }
+            }
+        }
+        out
     }
 
     pub fn glyph_width(&self, byte: u8, font_size: f64) -> f64 {
@@ -312,7 +402,10 @@ impl PdfFont {
         let _ = key;
         self.ttf.as_ref().map(|bytes| FontEmbed {
             pdf_name: self.name.clone(),
-            family: self.family.clone(),
+            family: self
+                .embed_family
+                .clone()
+                .unwrap_or_else(|| self.family.clone()),
             ttf_bytes: bytes.clone(),
             bold: self.bold,
             italic: self.italic,
@@ -322,6 +415,12 @@ impl PdfFont {
 
 fn pdf_err(e: lopdf::Error) -> Error {
     Error::Pdf(e.to_string())
+}
+
+fn tu_stream_bytes(s: &lopdf::Stream) -> Option<Vec<u8>> {
+    s.decompressed_content()
+        .ok()
+        .or_else(|| Some(s.content.clone()))
 }
 
 fn read_widths(doc: &Document, dict: &Dictionary) -> Result<(u32, Vec<f64>)> {
@@ -404,11 +503,11 @@ fn parse_bfchar(text: &str, map: &mut HashMap<u32, char>) {
     let mut in_bf = false;
     for line in text.lines() {
         let t = line.trim();
-        if t.starts_with("beginbfchar") {
+        if t.contains("beginbfchar") {
             in_bf = true;
             continue;
         }
-        if t.starts_with("endbfchar") {
+        if t.contains("endbfchar") {
             in_bf = false;
             continue;
         }
@@ -430,11 +529,11 @@ fn parse_bfrange(text: &str, map: &mut HashMap<u32, char>) {
     let mut in_bf = false;
     for line in text.lines() {
         let t = line.trim();
-        if t.starts_with("beginbfrange") {
+        if t.contains("beginbfrange") {
             in_bf = true;
             continue;
         }
-        if t.starts_with("endbfrange") {
+        if t.contains("endbfrange") {
             in_bf = false;
             continue;
         }
@@ -471,18 +570,131 @@ fn hex_to_char(hex: &str) -> Option<char> {
     }
 }
 
-fn parse_cid_widths(_desc: &Dictionary, _map: &mut HashMap<u32, char>) {}
+fn parse_cid_widths(desc: &Dictionary, map: &mut HashMap<u32, char>) {
+    if let Ok(ci) = desc.get(b"CIDSystemInfo") {
+        if let Ok(d) = ci.as_dict() {
+            if let Ok(ordering) = d.get(b"Ordering") {
+                if let Ok(name) = ordering.as_name() {
+                    let ord = String::from_utf8_lossy(name);
+                    if ord == "Identity" {
+                        let _ = map;
+                    }
+                }
+            }
+        }
+    }
+}
 
-fn read_font_file2(doc: &Document, dict: &Dictionary) -> Result<Option<Vec<u8>>> {
+fn read_descriptor_metrics(doc: &Document, dict: &Dictionary) -> (f64, f64) {
+    let desc = match dict.get(b"FontDescriptor") {
+        Ok(Object::Reference(id)) => doc.get_dictionary(*id).ok(),
+        Ok(Object::Dictionary(d)) => Some(d),
+        _ => None,
+    };
+    let Some(desc) = desc else {
+        return (0.8, 0.25);
+    };
+    let ascent = desc
+        .get(b"Ascent")
+        .ok()
+        .and_then(|o| o.as_i64().ok())
+        .unwrap_or(800) as f64
+        / 1000.0;
+    let mut space_em = 0.25;
+    if let Ok((first, widths)) = read_widths(doc, dict) {
+        let sp = 32u32;
+        if sp >= first {
+            let wi = (sp - first) as usize;
+            if let Some(&w) = widths.get(wi) {
+                space_em = w / 1000.0;
+            }
+        }
+    }
+    (ascent.max(0.5), space_em.max(0.1))
+}
+
+fn read_embed_family_from_ttf(data: &[u8]) -> Option<String> {
+    if data.len() < 12 {
+        return None;
+    }
+    let num_tables = u16::from_be_bytes([data[4], data[5]]) as usize;
+    let mut name_offset = 0usize;
+    let mut name_len = 0usize;
+    for i in 0..num_tables {
+        let off = 12 + i * 16;
+        if off + 16 > data.len() {
+            break;
+        }
+        if &data[off..off + 4] == b"name" {
+            name_offset =
+                u32::from_be_bytes([data[off + 8], data[off + 9], data[off + 10], data[off + 11]])
+                    as usize;
+            name_len = u32::from_be_bytes([
+                data[off + 12],
+                data[off + 13],
+                data[off + 14],
+                data[off + 15],
+            ]) as usize;
+            break;
+        }
+    }
+    if name_offset + 6 > data.len() || name_len == 0 {
+        return None;
+    }
+    let count = u16::from_be_bytes([data[name_offset + 2], data[name_offset + 3]]) as usize;
+    let string_offset =
+        name_offset + u16::from_be_bytes([data[name_offset + 4], data[name_offset + 5]]) as usize;
+    for i in 0..count {
+        let rec = name_offset + 6 + i * 12;
+        if rec + 12 > data.len() {
+            break;
+        }
+        let name_id = u16::from_be_bytes([data[rec + 6], data[rec + 7]]);
+        if name_id != 1 && name_id != 4 {
+            continue;
+        }
+        let length = u16::from_be_bytes([data[rec + 8], data[rec + 9]]) as usize;
+        let off = u16::from_be_bytes([data[rec + 10], data[rec + 11]]) as usize;
+        let start = string_offset + off;
+        if start + length > data.len() {
+            continue;
+        }
+        let slice = &data[start..start + length];
+        let is_utf16 = data[rec + 2] == 0 && data[rec + 3] == 3;
+        if is_utf16 && length >= 2 {
+            let mut s = String::new();
+            let mut j = 0;
+            while j + 1 < length {
+                let u = u16::from_be_bytes([slice[j], slice[j + 1]]);
+                if let Some(c) = char::from_u32(u32::from(u)) {
+                    s.push(c);
+                }
+                j += 2;
+            }
+            if !s.is_empty() {
+                return Some(s);
+            }
+        } else if let Ok(s) = std::str::from_utf8(slice) {
+            return Some(s.to_owned());
+        }
+    }
+    None
+}
+
+fn read_font_file2(doc: &Document, dict: &Dictionary) -> Result<(Option<Vec<u8>>, Option<String>)> {
     let desc = match dict.get(b"FontDescriptor") {
         Ok(Object::Reference(id)) => doc.get_dictionary(*id).map_err(pdf_err)?,
         Ok(Object::Dictionary(d)) => d,
-        _ => return Ok(None),
+        _ => return Ok((None, None)),
     };
     if let Ok(f) = desc.get(b"FontFile2") {
         if let Ok((_, Object::Stream(s))) = doc.dereference(f) {
-            return Ok(Some(s.content.clone()));
+            let fam = read_embed_family_from_ttf(&s.content);
+            return Ok((Some(s.content.clone()), fam));
         }
     }
-    Ok(None)
+    if desc.get(b"FontFile3").is_ok() || desc.get(b"FontFile").is_ok() {
+        return Ok((None, None));
+    }
+    Ok((None, None))
 }
