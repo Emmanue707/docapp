@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Docapp</string>
+    <string name="open_file">Open file</string>
+    <string name="recent_files">Recent files</string>
+    <string name="no_recent">No recent files yet</string>
+    <string name="tools">Tools</string>
+    <string name="merge">Merge</string>
+    <string name="split">Split</string>
+    <string name="rotate">Rotate</string>
+    <string name="delete_pages">Delete pages</string>
+    <string name="reorder">Reorder</string>
+    <string name="crop">Crop</string>
+    <string name="add_text">Add text</string>
+    <string name="add_image">Add image</string>
+    <string name="sign">Sign</string>
+    <string name="convert_word">Convert to Word</string>
+    <string name="images_to_pdf">Images to PDF</string>
+    <string name="ocr">OCR</string>
+    <string name="share">Share</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="working">Working…</string>
+    <string name="page_of">Page %1$d of %2$d</string>
+    <string name="about_title">About</string>
+    <string name="about_name">Waghitech Docapp</string>
+    <string name="download_models">Download OCR models (12 MB)</string>
+    <string name="models_ready">OCR models ready</string>
+    <string name="exact_look">Exact look</string>
+    <string name="editable">Editable</string>
+    <string name="make_searchable">Make searchable</string>
+    <string name="copy_text">Copy text</string>
+</resources>
