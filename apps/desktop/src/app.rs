@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use docsuite_convert::extract::extract_page;
 use docsuite_core::{CancelToken, Error, JobHandle, JobRunner, Progress, ProgressSink};
-use docsuite_pdf::{Pdf, PdfRect};
+use docsuite_pdf::{
+    DigitalSignOptions, Pdf, PdfRect, PdfSubFilter, load_identity_from_p12, sign_pdf_path,
+};
 use docsuite_viewer::{
     DEFAULT_CACHE_DESKTOP, ImageBackend, PageLayout, PdfiumBackend, RenderBackend, Viewer,
     Viewport, fit_width, pan, visible_page_range, zoom_around_point,
@@ -45,6 +47,10 @@ pub struct DocApp {
     space_pan: bool,
     crop_drag: Option<(ScreenPoint, ScreenPoint, u32)>,
     signature_pending: Option<Vec<u8>>,
+    sign_p12: Option<PathBuf>,
+    sign_password: String,
+    sign_name: String,
+    sign_reason: String,
 }
 
 impl Default for DocApp {
@@ -89,6 +95,10 @@ impl Default for DocApp {
             space_pan: false,
             crop_drag: None,
             signature_pending: None,
+            sign_p12: None,
+            sign_password: String::new(),
+            sign_name: String::new(),
+            sign_reason: String::new(),
         }
     }
 }
@@ -231,6 +241,46 @@ impl DocApp {
             }
             Err(e) => self.tool_message = format!("save failed: {e}"),
         }
+    }
+
+    fn digital_sign_certificate(&mut self) {
+        let Some(input) = self.path.clone() else {
+            self.tool_message = "open a pdf first".to_owned();
+            return;
+        };
+        let Some(p12) = self.sign_p12.clone() else {
+            self.tool_message = "pick a signing identity".to_owned();
+            return;
+        };
+        let password = self.sign_password.clone();
+        let name = if self.sign_name.is_empty() {
+            None
+        } else {
+            Some(self.sign_name.clone())
+        };
+        let reason = if self.sign_reason.is_empty() {
+            None
+        } else {
+            Some(self.sign_reason.clone())
+        };
+        let stem = input
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("document");
+        let output = input.with_file_name(format!("{stem}-signed.pdf"));
+        self.run_bg("sign", move |cancel, progress| {
+            let identity = load_identity_from_p12(&p12, &password).map_err(|e| e.to_string())?;
+            let opts = DigitalSignOptions {
+                field_name: "Signature1".to_owned(),
+                sub_filter: PdfSubFilter::Pades,
+                reason: reason.clone(),
+                location: None,
+                contact: name.clone(),
+                visible: None,
+            };
+            sign_pdf_path(&input, &output, &identity, &opts, &cancel, &progress)
+                .map_err(|e| e.to_string())
+        });
     }
 
     fn run_bg<F>(&mut self, stage: &'static str, work: F)
@@ -537,6 +587,28 @@ impl eframe::App for DocApp {
                     } else {
                         "no signature image"
                     });
+                    ui.separator();
+                    ui.label("Digital signature (certificate)");
+                    if ui.button("Pick signing identity (.p12 path)").clicked()
+                        && let Some(f) = rfd::FileDialog::new().pick_file()
+                    {
+                        self.sign_p12 = Some(f);
+                    }
+                    if let Some(p) = &self.sign_p12 {
+                        ui.label(p.display().to_string());
+                    }
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.sign_password)
+                            .password(true)
+                            .hint_text("keystore password"),
+                    );
+                    ui.text_edit_singleline(&mut self.sign_name);
+                    ui.label("signer name (optional)");
+                    ui.text_edit_singleline(&mut self.sign_reason);
+                    ui.label("reason (optional)");
+                    if ui.button("Apply digital signature").clicked() {
+                        self.digital_sign_certificate();
+                    }
                 });
                 ui.collapsing("Convert", |ui| {
                     if ui.button("PDF → Word (exact)").clicked() {
