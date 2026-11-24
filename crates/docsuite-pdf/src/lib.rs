@@ -15,6 +15,7 @@ mod ranges;
 mod reorder;
 mod resources;
 mod rotate;
+mod searchable;
 mod signature;
 mod split;
 #[cfg(test)]
@@ -29,6 +30,7 @@ pub use pdf::Pdf;
 pub use ranges::PageRanges;
 pub use reorder::{delete_pages, extract_pages, reorder};
 pub use rotate::{normalize_degrees, rotate};
+pub use searchable::{PlacedWord, add_searchable_text_layer};
 pub use signature::{SignatureStamp, Signer, sign_pdf, visible_signature};
 pub use split::{split, split_every};
 
