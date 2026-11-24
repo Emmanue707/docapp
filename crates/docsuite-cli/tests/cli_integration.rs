@@ -103,6 +103,23 @@ fn cli_info_and_split() {
     );
     assert!(out_dir.join("doc-part001.pdf").exists());
 
+    let out_dir2 = dir.join("parts2");
+    let split2 = Command::new(bin)
+        .args([
+            "split",
+            pdf_path.to_str().unwrap(),
+            "--ranges",
+            "1,3",
+            "-o",
+            out_dir2.to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .unwrap();
+    assert!(split2.status.success());
+    assert!(out_dir2.join("doc-part001.pdf").exists());
+    assert!(out_dir2.join("doc-part002.pdf").exists());
+
     let png_path = dir.join("scan.png");
     let pdf_out = dir.join("scan.pdf");
     let mut f = std::fs::File::create(&png_path).unwrap();

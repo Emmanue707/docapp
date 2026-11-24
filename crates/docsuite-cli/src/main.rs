@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
-use docsuite_convert::{ConvertOptions, ImageToPdfOptions, convert};
+use docsuite_convert::{
+    ConvertOptions, ImageToPdfOptions, PdfToWordMode, PdfToWordOptions, convert,
+};
 use docsuite_core::CancelToken;
 use docsuite_ocr::predict_type;
 use docsuite_pdf::{
@@ -59,6 +61,8 @@ struct SplitCmd {
     ranges: Vec<String>,
     #[arg(long)]
     every: Option<u32>,
+    #[arg(long, help = "Keep all selected pages in one output file")]
+    single: bool,
     #[arg(short, long)]
     output: PathBuf,
     #[command(flatten)]
@@ -187,6 +191,12 @@ struct ConvertCmd {
     fit_a4: bool,
     #[arg(long)]
     fit_letter: bool,
+    #[arg(long, value_parser = ["exact", "editable"])]
+    mode: Option<String>,
+    #[arg(long)]
+    no_embed_fonts: bool,
+    #[arg(long)]
+    pages: Option<String>,
     #[command(flatten)]
     force: ForceOpt,
 }
@@ -269,13 +279,19 @@ fn cmd_split(cmd: SplitCmd, quiet: bool) -> Result<()> {
         .unwrap_or("doc");
     let parts = if let Some(n) = cmd.every {
         split_every(&pdf, n, &cancel, &progress).map_err(|e| anyhow::anyhow!("{e}"))?
-    } else {
+    } else if cmd.single {
         let ranges: Vec<PageRanges> = cmd
             .ranges
             .iter()
             .map(|r| PageRanges::parse(r).map_err(|e| anyhow::anyhow!("{e}")))
             .collect::<Result<_>>()?;
         split(&pdf, &ranges, &cancel, &progress).map_err(|e| anyhow::anyhow!("{e}"))?
+    } else {
+        let mut groups = Vec::new();
+        for r in &cmd.ranges {
+            groups.extend(PageRanges::parse_groups(r).map_err(|e| anyhow::anyhow!("{e}"))?);
+        }
+        split(&pdf, &groups, &cancel, &progress).map_err(|e| anyhow::anyhow!("{e}"))?
     };
     for (i, mut part) in parts.into_iter().enumerate() {
         let path = part_path(&cmd.output, stem, i + 1);
@@ -444,9 +460,23 @@ fn cmd_convert(cmd: ConvertCmd, quiet: bool) -> Result<()> {
     } else {
         ImagePageFit::Natural72
     };
+    let mode = match cmd.mode.as_deref() {
+        Some("editable") => PdfToWordMode::Editable,
+        Some("exact") | None => PdfToWordMode::ExactLook,
+        Some(other) => bail!("unknown mode '{other}'"),
+    };
+    let pages = match &cmd.pages {
+        Some(p) => Some(PageRanges::parse(p).map_err(|e| anyhow::anyhow!("{e}"))?),
+        None => None,
+    };
     let opts = ConvertOptions {
         image: ImageToPdfOptions { fit },
-        ..ConvertOptions::default()
+        pdf_to_word: PdfToWordOptions {
+            mode,
+            embed_fonts: !cmd.no_embed_fonts,
+            pages,
+            ..PdfToWordOptions::default()
+        },
     };
     let cancel = CancelToken::new();
     let progress = progress_sink(quiet);
