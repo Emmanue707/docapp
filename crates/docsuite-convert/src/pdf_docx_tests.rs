@@ -572,6 +572,132 @@ fn jpeg_xobject_in_docx() {
 }
 
 #[test]
+fn rotated_scanned_image_page_size() {
+    let dir = work_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let pdf_path = dir.join("rotscan.pdf");
+    let mut doc = Document::with_version("1.5");
+    let jpeg = vec![0xFF, 0xD8, 0xFF, 0xD9];
+    let img_id = doc.add_object(Stream::new(
+        dictionary! {
+            "Type" => "XObject",
+            "Subtype" => "Image",
+            "Width" => 100,
+            "Height" => 80,
+            "ColorSpace" => "DeviceRGB",
+            "BitsPerComponent" => 8,
+            "Filter" => "DCTDecode",
+        },
+        jpeg,
+    ));
+    let pages_id = doc.new_object_id();
+    let resources_id = doc.add_object(dictionary! {
+        "XObject" => dictionary! { "Im0" => img_id },
+    });
+    let content = Content {
+        operations: vec![
+            Operation::new("q", vec![]),
+            Operation::new(
+                "cm",
+                vec![
+                    841.68_f32.into(),
+                    0.into(),
+                    0.into(),
+                    595.2_f32.into(),
+                    0.into(),
+                    0.into(),
+                ],
+            ),
+            Operation::new("Do", vec!["Im0".into()]),
+            Operation::new("Q", vec![]),
+        ],
+    };
+    let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "Rotate" => 270,
+        "Resources" => resources_id,
+        "MediaBox" => vec![0.into(), 0.into(), 841.68.into(), 595.2.into()],
+        "Contents" => content_id,
+    });
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        }),
+    );
+    let catalog_id = doc.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+    });
+    doc.trailer.set("Root", catalog_id);
+    save_doc(doc, &pdf_path);
+    let pdf = docsuite_pdf::Pdf::load(&pdf_path).unwrap();
+    let page = extract::extract_page(pdf.lopdf_document(), pdf.page_id(1).unwrap()).unwrap();
+    assert!(page.width < page.height);
+    let img = &page.images[0];
+    assert!((img.width - page.width).abs() < 0.5);
+    assert!((img.height - page.height).abs() < 0.5);
+    let out = dir.join("rot.docx");
+    pdf_to_docx(
+        &pdf_path,
+        &out,
+        &PdfToWordOptions::default(),
+        &CancelToken::new(),
+        &None,
+    )
+    .unwrap();
+    let bytes = std::fs::read(&out).unwrap();
+    let xml =
+        String::from_utf8(docx::read_zip_entry(&bytes, "word/document.xml").unwrap()).unwrap();
+    assert!(!xml.contains("orient=\"landscape\""));
+    let cx = (595.2_f64 * 12700.0).round() as i64;
+    assert!(xml.contains(&format!("cx=\"{cx}\"")));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ocr_records_upright_input_dims() {
+    use std::sync::Arc;
+
+    use crate::RecognizerPageOcr;
+    use crate::page_ocr::RecordingRecognizer;
+
+    let rec = Arc::new(RecordingRecognizer::new());
+    let ocr = RecognizerPageOcr {
+        recognizer: rec.clone(),
+        highlight_low_confidence: false,
+    };
+    let img = crate::types::PlacedImage {
+        bytes: {
+            let mut g = image::GrayImage::new(3507, 2480);
+            for p in g.pixels_mut() {
+                p.0[0] = 200;
+            }
+            let mut buf = Vec::new();
+            image::DynamicImage::ImageLuma8(g)
+                .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+                .unwrap();
+            buf
+        },
+        kind: crate::types::ImageKind::Png,
+        x: 0.0,
+        y: 0.0,
+        width: 595.0,
+        height: 842.0,
+        behind: false,
+        orient_fallback: false,
+    };
+    let _ = crate::PageOcr::ocr_placed(&ocr, &img, &CancelToken::new()).unwrap();
+    let w = *rec.last_w.lock().unwrap();
+    let h = *rec.last_h.lock().unwrap();
+    assert!(w.max(h) <= 2200);
+}
+
+#[test]
 fn form_xobject_matrix() {
     let dir = work_dir();
     let _ = std::fs::create_dir_all(&dir);

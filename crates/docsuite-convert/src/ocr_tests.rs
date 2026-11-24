@@ -11,6 +11,8 @@ fn scanned_page_detection() {
         width: 100.0,
         height: 100.0,
         rotate: 0,
+        source_rotate: 0,
+        crop_box: [0.0, 0.0, 100.0, 100.0],
         text: Vec::new(),
         images: vec![PlacedImage {
             bytes: vec![],
@@ -20,6 +22,7 @@ fn scanned_page_detection() {
             width: 90.0,
             height: 90.0,
             behind: false,
+            orient_fallback: true,
         }],
         vectors: Vec::new(),
     };
@@ -80,12 +83,15 @@ fn fake_ocr_lines_to_docx() {
         width: 200.0,
         height: 200.0,
         behind: true,
+        orient_fallback: true,
     };
     let runs = lines_to_text_runs(&lines, &img, 200, 200, false);
     let page = ExtractedPage {
         width: 200.0,
         height: 200.0,
         rotate: 0,
+        source_rotate: 0,
+        crop_box: [0.0, 0.0, 200.0, 200.0],
         text: runs_to_text_lines(&runs),
         images: vec![img],
         vectors: Vec::new(),
