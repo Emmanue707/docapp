@@ -1511,7 +1511,7 @@ dependencies = [
 
 [[package]]
 name = "docapp-desktop"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "docsuite-convert",
@@ -1529,7 +1529,7 @@ dependencies = [
 
 [[package]]
 name = "docsuite-cli"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -1544,7 +1544,7 @@ dependencies = [
 
 [[package]]
 name = "docsuite-convert"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "docsuite-core",
  "docsuite-ocr",
@@ -1563,14 +1563,14 @@ dependencies = [
 
 [[package]]
 name = "docsuite-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "docsuite-ffi"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "docsuite-convert",
  "docsuite-core",
@@ -1583,7 +1583,7 @@ dependencies = [
 
 [[package]]
 name = "docsuite-models"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "docsuite-core",
@@ -1594,7 +1594,7 @@ dependencies = [
 
 [[package]]
 name = "docsuite-ocr"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "docsuite-core",
  "image",
@@ -1607,7 +1607,7 @@ dependencies = [
 
 [[package]]
 name = "docsuite-pdf"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "cms",
  "const-oid",
@@ -1632,7 +1632,7 @@ dependencies = [
 
 [[package]]
 name = "docsuite-viewer"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "docsuite-core",
  "image",
