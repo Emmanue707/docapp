@@ -221,7 +221,7 @@ fn ruled_grid_table() {
     let bytes = std::fs::read(&docx_path).unwrap();
     let xml =
         String::from_utf8(docx::read_zip_entry(&bytes, "word/document.xml").unwrap()).unwrap();
-    assert!(xml.contains("w:tbl") || xml.contains("A1"));
+    assert!(xml.contains("A1"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -795,4 +795,246 @@ fn office_fixture_text_if_present() {
         "extracted {:?}",
         &text[..text.len().min(200)]
     );
+}
+
+#[test]
+fn clip_rect_not_filled_black() {
+    let dir = work_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let pdf_path = dir.join("clip.pdf");
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let font_id = doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type1",
+        "BaseFont" => "Helvetica",
+    });
+    let resources_id = doc.add_object(dictionary! {
+        "Font" => dictionary! { "F1" => font_id },
+    });
+    let content = Content {
+        operations: vec![
+            Operation::new("re", vec![0.into(), 0.into(), 595.into(), 842.into()]),
+            Operation::new("W", vec![]),
+            Operation::new("n", vec![]),
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Td", vec![72.into(), 700.into()]),
+            Operation::new("Tj", vec![Object::string_literal("visible")]),
+            Operation::new("ET", vec![]),
+        ],
+    };
+    let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "Resources" => resources_id,
+        "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        "Contents" => content_id,
+    });
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        }),
+    );
+    let catalog_id = doc.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+    });
+    doc.trailer.set("Root", catalog_id);
+    save_doc(doc, &pdf_path);
+    let pdf = docsuite_pdf::Pdf::load(&pdf_path).unwrap();
+    let page = extract::extract_page(pdf.lopdf_document(), pdf.page_id(1).unwrap()).unwrap();
+    assert!(
+        page.vectors.is_empty(),
+        "clip rectangle must not become a fill vector"
+    );
+    let text: String = page
+        .text
+        .iter()
+        .flat_map(|l| l.runs.iter())
+        .map(|r| r.text.as_str())
+        .collect();
+    assert!(text.contains("visible"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn path_y_flipped_to_page_top() {
+    let dir = work_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let pdf_path = dir.join("path.pdf");
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let content = Content {
+        operations: vec![
+            Operation::new("m", vec![72.into(), 100.into()]),
+            Operation::new("l", vec![200.into(), 100.into()]),
+            Operation::new("S", vec![]),
+        ],
+    };
+    let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        "Contents" => content_id,
+    });
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        }),
+    );
+    let catalog_id = doc.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+    });
+    doc.trailer.set("Root", catalog_id);
+    save_doc(doc, &pdf_path);
+    let pdf = docsuite_pdf::Pdf::load(&pdf_path).unwrap();
+    let page = extract::extract_page(pdf.lopdf_document(), pdf.page_id(1).unwrap()).unwrap();
+    assert_eq!(page.vectors.len(), 1);
+    let y = match &page.vectors[0].segments[0] {
+        crate::types::PathSegment::MoveTo(p) => p.y,
+        _ => 0.0,
+    };
+    assert!((y - 742.0).abs() < 2.0, "y={y}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn tj_kerning_adjustment() {
+    let dir = work_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let pdf_path = dir.join("tj.pdf");
+    let mut doc = Document::with_version("1.5");
+    let font_id = doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type1",
+        "BaseFont" => "Helvetica",
+        "Widths" => vec![500.into(); 256],
+        "FirstChar" => 0,
+        "LastChar" => 255,
+    });
+    let pages_id = doc.new_object_id();
+    let resources_id = doc.add_object(dictionary! {
+        "Font" => dictionary! { "F1" => font_id },
+    });
+    let content = Content {
+        operations: vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 10.into()]),
+            Operation::new("Td", vec![100.into(), 700.into()]),
+            Operation::new(
+                "TJ",
+                vec![Object::Array(vec![
+                    Object::string_literal("A"),
+                    Object::Integer(-500),
+                    Object::string_literal("B"),
+                ])],
+            ),
+            Operation::new("ET", vec![]),
+        ],
+    };
+    let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "Resources" => resources_id,
+        "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        "Contents" => content_id,
+    });
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        }),
+    );
+    let catalog_id = doc.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+    });
+    doc.trailer.set("Root", catalog_id);
+    save_doc(doc, &pdf_path);
+    let pdf = docsuite_pdf::Pdf::load(&pdf_path).unwrap();
+    let page = extract::extract_page(pdf.lopdf_document(), pdf.page_id(1).unwrap()).unwrap();
+    let runs: Vec<_> = page.text.iter().flat_map(|l| l.runs.iter()).collect();
+    let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+    assert_eq!(text, "AB");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn exact_mode_section_breaks_per_page() {
+    let dir = work_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let pdf_path = dir.join("two.pdf");
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let font_id = doc.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type1",
+        "BaseFont" => "Helvetica",
+    });
+    let resources_id = doc.add_object(dictionary! {
+        "Font" => dictionary! { "F1" => font_id },
+    });
+    let mut kids = Vec::new();
+    for p in 0..2 {
+        let content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 12.into()]),
+                Operation::new("Td", vec![72.into(), 700.into()]),
+                Operation::new("Tj", vec![Object::string_literal(format!("P{p}"))]),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            "Contents" => content_id,
+        });
+        kids.push(page_id.into());
+    }
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => kids,
+            "Count" => 2,
+        }),
+    );
+    let catalog_id = doc.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+    });
+    doc.trailer.set("Root", catalog_id);
+    save_doc(doc, &pdf_path);
+    let out = dir.join("two.docx");
+    pdf_to_docx(
+        &pdf_path,
+        &out,
+        &PdfToWordOptions::default(),
+        &CancelToken::new(),
+        &None,
+    )
+    .unwrap();
+    let bytes = std::fs::read(&out).unwrap();
+    let xml =
+        String::from_utf8(docx::read_zip_entry(&bytes, "word/document.xml").unwrap()).unwrap();
+    assert!(xml.contains("nextPage"));
+    assert!(xml.matches("<w:pgSz").count() >= 2);
+    let _ = std::fs::remove_dir_all(&dir);
 }
