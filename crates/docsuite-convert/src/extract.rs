@@ -7,7 +7,8 @@ use lopdf::{Document, Object, ObjectId, Stream};
 use crate::fonts::PdfFont;
 use crate::matrix::Matrix;
 use crate::types::{
-    ExtractedPage, ImageKind, PathPoint, PathSegment, PlacedImage, RgbColor, TextRun, VectorPath,
+    ExtractedPage, ImageKind, PathPoint, PathSegment, PlacedImage, RgbColor, TextLine, TextRun,
+    VectorPath,
 };
 
 #[derive(Clone)]
@@ -49,7 +50,7 @@ impl GfxState {
 
 struct ExtractCtx {
     page_h: f64,
-    text: Vec<TextRun>,
+    text: Vec<TextLine>,
     images: Vec<PlacedImage>,
     vectors: Vec<VectorPath>,
     raw_runs: Vec<TextRun>,
@@ -102,7 +103,7 @@ pub fn extract_page(doc: &Document, page_id: ObjectId) -> Result<ExtractedPage> 
         resources,
         Matrix::IDENTITY,
     )?;
-    ctx.text = merge_text_runs(&ctx.raw_runs, gs.fonts.clone());
+    ctx.text = merge_into_lines(&ctx.raw_runs, &gs.fonts);
     Ok(ExtractedPage {
         width,
         height,
@@ -145,6 +146,36 @@ fn object_num(obj: &Object) -> Result<f64> {
         Object::Real(v) => Ok(f64::from(*v)),
         _ => Err(Error::Pdf("expected number".to_owned())),
     }
+}
+
+fn fonts_from_resources(doc: &Document, resources: &Object) -> Result<HashMap<String, PdfFont>> {
+    let res_dict = match doc.dereference(resources) {
+        Ok((_, Object::Dictionary(d))) => d.clone(),
+        Ok((_, Object::Reference(id))) => doc
+            .get_dictionary(*id)
+            .map_err(|e| Error::Pdf(e.to_string()))?
+            .clone(),
+        _ => return Ok(HashMap::new()),
+    };
+    let font_dict = match res_dict.get(b"Font") {
+        Ok(f) => f,
+        Err(_) => return Ok(HashMap::new()),
+    };
+    let fonts = match doc.dereference(font_dict) {
+        Ok((_, Object::Dictionary(d))) => d.clone(),
+        _ => font_dict.as_dict().ok().cloned().unwrap_or_default(),
+    };
+    let mut out = HashMap::new();
+    for (key, value) in fonts.iter() {
+        let name = String::from_utf8_lossy(key).into_owned();
+        let Object::Reference(id) = value else {
+            continue;
+        };
+        if let Ok(font) = PdfFont::load(doc, *id, &name) {
+            out.insert(name, font);
+        }
+    }
+    Ok(out)
 }
 
 fn load_page_fonts(doc: &Document, page: &lopdf::Dictionary) -> Result<HashMap<String, PdfFont>> {
@@ -428,14 +459,16 @@ fn show_string(
     let font_size = gs.font_size * combined.scale_x();
     let width = font.string_width(bytes, font_size);
     let (top_x, top_y) = ctx.pdf_y_to_top(x, y);
+    let ascent = font.ascent_pt(font_size);
     let hidden = gs.render_mode == 3;
     let run = TextRun {
         text,
         x: top_x,
-        y: top_y - font_size,
+        y: top_y - ascent,
         width,
         font_size,
         font_key: gs.font_key.clone(),
+        font_family: font.display_family().to_owned(),
         bold: font.bold,
         italic: font.italic,
         color: RgbColor::from_pdf_rgb(gs.fill_rgb.0, gs.fill_rgb.1, gs.fill_rgb.2),
@@ -513,6 +546,13 @@ fn handle_xobject(
         let form_res = stream.dict.get(b"Resources").ok();
         let content = Content::decode(&stream.content).map_err(|e| Error::Pdf(e.to_string()))?;
         let mut sub_gs = gs.clone();
+        if let Some(res) = form_res {
+            if let Ok(extra) = fonts_from_resources(doc, res) {
+                for (k, v) in extra {
+                    sub_gs.fonts.insert(k, v);
+                }
+            }
+        }
         interpret_ops(
             doc,
             ctx,
@@ -614,37 +654,147 @@ fn dict_int(dict: &lopdf::Dictionary, key: &[u8]) -> i64 {
         .unwrap_or(0)
 }
 
-fn merge_text_runs(raw: &[TextRun], fonts: HashMap<String, PdfFont>) -> Vec<TextRun> {
-    let visible: Vec<_> = raw.iter().filter(|r| !r.hidden).cloned().collect();
+fn line_baseline(line: &[TextRun]) -> f64 {
+    line.first().map(|r| r.y).unwrap_or(0.0)
+}
+
+fn merge_into_lines(raw: &[TextRun], fonts: &HashMap<String, PdfFont>) -> Vec<TextLine> {
+    let visible: Vec<_> = raw
+        .iter()
+        .filter(|r| !r.hidden && !r.text.is_empty())
+        .cloned()
+        .collect();
     if visible.is_empty() {
         return Vec::new();
     }
-    let mut merged = Vec::new();
-    let mut current = visible[0].clone();
-    for run in visible.iter().skip(1) {
-        let same_line = (run.y - current.y).abs() < 1.0;
-        let same_style = run.font_key == current.font_key
-            && (run.font_size - current.font_size).abs() < 0.5
-            && run.color == current.color
-            && run.bold == current.bold
-            && run.italic == current.italic;
-        let gap = run.x - (current.x + current.width);
-        let em = current.font_size.max(1.0);
-        if same_line && same_style && gap < em * 0.8 && gap > -1.0 {
-            if gap > em * 0.25 {
-                current.text.push(' ');
-                current.width += em * 0.25;
-            }
-            current.text.push_str(&run.text);
-            current.width = run.x + run.width - current.x;
-        } else {
-            merged.push(current);
-            current = run.clone();
+    let mut sorted = visible;
+    for run in &mut sorted {
+        let snap = run.font_size * 0.25;
+        if snap > 0.01 {
+            run.y = (run.y / snap).round() * snap;
         }
     }
-    merged.push(current);
-    let _ = fonts;
-    merged
+    sorted.sort_by(|a, b| {
+        let yc = a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal);
+        if yc != std::cmp::Ordering::Equal {
+            yc
+        } else {
+            a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal)
+        }
+    });
+    let mut groups: Vec<Vec<TextRun>> = Vec::new();
+    for run in sorted {
+        let mut placed = false;
+        for group in groups.iter_mut() {
+            let base_y = line_baseline(group);
+            let size = group
+                .iter()
+                .map(|r| r.font_size)
+                .fold(0.0f64, f64::max)
+                .max(run.font_size);
+            if (run.y - base_y).abs() > size * 0.25 {
+                continue;
+            }
+            let Some(last) = group.last() else {
+                group.push(run.clone());
+                placed = true;
+                break;
+            };
+            let gap = run.x - (last.x + last.width);
+            if gap > size * 3.0 {
+                continue;
+            }
+            let space_w = fonts
+                .get(&last.font_key)
+                .map(|f| f.space_width(last.font_size))
+                .unwrap_or(last.font_size * 0.25);
+            if gap > size * 0.15 && gap < space_w * 1.5 {
+                let same_style = run.font_key == last.font_key
+                    && (run.font_size - last.font_size).abs() < 0.5
+                    && run.color == last.color
+                    && run.bold == last.bold
+                    && run.italic == last.italic;
+                if same_style {
+                    let mut merged = last.clone();
+                    merged.text.push(' ');
+                    merged.width += space_w;
+                    merged.text.push_str(&run.text);
+                    merged.width = run.x + run.width - merged.x;
+                    let idx = group.len() - 1;
+                    group[idx] = merged;
+                } else {
+                    let mut nr = run.clone();
+                    nr.text = format!(" {}", nr.text);
+                    nr.width += space_w;
+                    group.push(nr);
+                }
+            } else {
+                group.push(run.clone());
+            }
+            placed = true;
+            break;
+        }
+        if !placed {
+            groups.push(vec![run]);
+        }
+    }
+    let mut lines = Vec::with_capacity(groups.len());
+    for runs in groups {
+        if runs.is_empty() {
+            continue;
+        }
+        let x0 = runs.iter().map(|r| r.x).fold(f64::MAX, f64::min);
+        let y0 = runs.iter().map(|r| r.y).fold(f64::MAX, f64::min);
+        let x1 = runs.iter().map(|r| r.x + r.width).fold(f64::MIN, f64::max);
+        let max_size = runs.iter().map(|r| r.font_size).fold(0.0f64, f64::max);
+        let ascent = runs
+            .iter()
+            .filter_map(|r| fonts.get(&r.font_key).map(|f| f.ascent_pt(r.font_size)))
+            .fold(max_size * 0.8, f64::max);
+        lines.push(TextLine {
+            runs,
+            x: x0,
+            y: y0,
+            width: (x1 - x0).max(1.0) + 2.0,
+            height: ascent.max(max_size * 0.5),
+        });
+    }
+    lines.sort_by(|a, b| {
+        let yc = a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal);
+        if yc != std::cmp::Ordering::Equal {
+            yc
+        } else {
+            a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal)
+        }
+    });
+    compress_adjacent_lines(lines)
+}
+
+fn compress_adjacent_lines(mut lines: Vec<TextLine>) -> Vec<TextLine> {
+    if lines.is_empty() {
+        return lines;
+    }
+    let mut out: Vec<TextLine> = Vec::new();
+    let mut cur = lines.remove(0);
+    for line in lines {
+        let size = cur
+            .runs
+            .iter()
+            .map(|r| r.font_size)
+            .fold(0.0f64, f64::max)
+            .max(line.runs.iter().map(|r| r.font_size).fold(0.0, f64::max));
+        let same_row = (line.y - cur.y).abs() <= size * 0.25;
+        let gap = line.x - (cur.x + cur.width);
+        if same_row && gap < size * 2.0 {
+            cur.runs.extend(line.runs);
+            cur.width = (line.x + line.width - cur.x).max(cur.width);
+        } else {
+            out.push(cur);
+            cur = line;
+        }
+    }
+    out.push(cur);
+    out
 }
 
 fn matrix_from_ops(ops: &[Object]) -> Matrix {

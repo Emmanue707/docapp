@@ -27,11 +27,21 @@ pub struct TextRun {
     pub width: f64,
     pub font_size: f64,
     pub font_key: String,
+    pub font_family: String,
     pub bold: bool,
     pub italic: bool,
     pub color: RgbColor,
     pub char_spacing: f64,
     pub hidden: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextLine {
+    pub runs: Vec<TextRun>,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,7 +87,7 @@ pub struct ExtractedPage {
     pub width: f64,
     pub height: f64,
     pub rotate: i32,
-    pub text: Vec<TextRun>,
+    pub text: Vec<TextLine>,
     pub images: Vec<PlacedImage>,
     pub vectors: Vec<VectorPath>,
 }
