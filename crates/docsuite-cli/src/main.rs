@@ -14,8 +14,10 @@ use docsuite_core::CancelToken;
 use docsuite_ocr::OcrsRecognizer;
 use docsuite_ocr::predict_type;
 use docsuite_pdf::{
-    ImagePageFit, PageRanges, Pdf, Rgb, SignatureStamp, add_image, add_text, crop, delete_pages,
-    merge, pdf_info, reorder, rotate, split, split_every, visible_signature,
+    CertKeyType, DigitalSignOptions, ImagePageFit, NewCertParams, PageRanges, Pdf, PdfSubFilter,
+    Rgb, SignatureReport, SignatureStamp, add_image, add_text, crop, delete_pages,
+    generate_self_signed, load_identity_from_p12, merge, pdf_info, reorder, rotate, sign_pdf_path,
+    split, split_every, verify_pdf_bytes, visible_signature, write_cert_output,
 };
 use util::{
     ensure_output, ensure_output_dir, field_type_label, parse_order, parse_pages, parse_rect,
@@ -43,6 +45,9 @@ enum Commands {
     StampText(StampTextCmd),
     StampImage(StampImageCmd),
     SignVisible(SignVisibleCmd),
+    Cert(CertCmd),
+    Sign(SignCmd),
+    Verify(VerifyCmd),
     DetectType(DetectTypeCmd),
     Convert(ConvertCmd),
     Ocr(OcrCmd),
@@ -163,6 +168,57 @@ struct StampImageCmd {
     output: PathBuf,
     #[command(flatten)]
     force: ForceOpt,
+}
+
+#[derive(Subcommand)]
+enum CertSub {
+    New(CertNewCmd),
+}
+
+#[derive(Args)]
+struct CertCmd {
+    #[command(subcommand)]
+    command: CertSub,
+}
+
+#[derive(Args)]
+struct CertNewCmd {
+    #[arg(long)]
+    name: String,
+    #[arg(long)]
+    email: Option<String>,
+    #[arg(long, value_parser = ["p256", "rsa3072"], default_value = "p256")]
+    key: String,
+    #[arg(short, long)]
+    output: PathBuf,
+}
+
+#[derive(Args)]
+struct SignCmd {
+    input: PathBuf,
+    #[arg(long)]
+    p12: PathBuf,
+    #[arg(long)]
+    password_env: Option<String>,
+    #[arg(long)]
+    page: Option<u32>,
+    #[arg(long, value_name = "X,Y,W,H")]
+    rect: Option<String>,
+    #[arg(long)]
+    name: Option<String>,
+    #[arg(long)]
+    reason: Option<String>,
+    #[arg(long)]
+    location: Option<String>,
+    #[arg(short, long)]
+    output: PathBuf,
+    #[command(flatten)]
+    force: ForceOpt,
+}
+
+#[derive(Args)]
+struct VerifyCmd {
+    input: PathBuf,
 }
 
 #[derive(Args)]
@@ -299,6 +355,9 @@ fn main() -> Result<()> {
         Commands::StampText(cmd) => cmd_stamp_text(cmd, cli.quiet),
         Commands::StampImage(cmd) => cmd_stamp_image(cmd, cli.quiet),
         Commands::SignVisible(cmd) => cmd_sign_visible(cmd, cli.quiet),
+        Commands::Cert(cmd) => cmd_cert(cmd),
+        Commands::Sign(cmd) => cmd_sign(cmd, cli.quiet),
+        Commands::Verify(cmd) => cmd_verify(cmd),
         Commands::DetectType(cmd) => cmd_detect_type(cmd),
         Commands::Convert(cmd) => cmd_convert(cmd, cli.quiet),
         Commands::Ocr(cmd) => cmd_ocr(cmd, cli.quiet),
@@ -480,6 +539,101 @@ fn cmd_stamp_image(cmd: StampImageCmd, quiet: bool) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("{e}"))
         },
     )
+}
+
+fn cmd_cert(cmd: CertCmd) -> Result<()> {
+    match cmd.command {
+        CertSub::New(c) => cmd_cert_new(c),
+    }
+}
+
+fn cmd_cert_new(cmd: CertNewCmd) -> Result<()> {
+    let key_type = match cmd.key.as_str() {
+        "p256" => CertKeyType::P256,
+        "rsa3072" => CertKeyType::Rsa3072,
+        other => bail!("unknown key type '{other}'"),
+    };
+    let params = NewCertParams {
+        common_name: cmd.name,
+        email: cmd.email,
+        key_type,
+    };
+    let generated = generate_self_signed(&params).map_err(|e| anyhow::anyhow!("{e}"))?;
+    write_cert_output(&cmd.output, &generated).map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!("wrote identity material for {}", cmd.output.display());
+    Ok(())
+}
+
+fn sign_password(env_var: &Option<String>) -> Result<String> {
+    match env_var {
+        Some(name) => std::env::var(name).with_context(|| format!("read password env ${name}")),
+        None => Ok(String::new()),
+    }
+}
+
+fn cmd_sign(cmd: SignCmd, quiet: bool) -> Result<()> {
+    ensure_output(&cmd.output, &[cmd.input.as_path()], cmd.force.force)?;
+    let password = sign_password(&cmd.password_env)?;
+    let identity =
+        load_identity_from_p12(&cmd.p12, &password).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let visible = match (cmd.page, cmd.rect.as_deref()) {
+        (Some(page), Some(rect_spec)) => {
+            let rect = parse_rect(rect_spec)?;
+            let stamp = SignatureStamp {
+                name: cmd.name.clone().unwrap_or_else(|| "Signed".to_owned()),
+                reason: cmd.reason.clone().unwrap_or_default(),
+                date: String::new(),
+                image: None,
+            };
+            Some((page, rect, stamp))
+        }
+        (None, None) => None,
+        _ => bail!("sign with visible stamp needs both --page and --rect"),
+    };
+    let opts = DigitalSignOptions {
+        field_name: "Signature1".to_owned(),
+        sub_filter: PdfSubFilter::Pades,
+        reason: cmd.reason,
+        location: cmd.location,
+        contact: cmd.name,
+        visible,
+    };
+    let cancel = CancelToken::new();
+    let progress = progress_sink(quiet);
+    sign_pdf_path(
+        &cmd.input,
+        &cmd.output,
+        &identity,
+        &opts,
+        &cancel,
+        &progress,
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+fn cmd_verify(cmd: VerifyCmd) -> Result<()> {
+    let bytes = std::fs::read(&cmd.input).context("read pdf")?;
+    let reports = verify_pdf_bytes(&bytes).map_err(|e| anyhow::anyhow!("{e}"))?;
+    if reports.is_empty() {
+        println!("no digital signatures");
+        return Ok(());
+    }
+    for (i, r) in reports.iter().enumerate() {
+        print_signature_report(i + 1, r);
+    }
+    Ok(())
+}
+
+fn print_signature_report(index: usize, r: &SignatureReport) {
+    println!("signature {index}:");
+    println!("  signer: {}", r.signer_cn);
+    if let Some(t) = &r.signing_time {
+        println!("  time: {t}");
+    }
+    println!("  digest ok: {}", r.digest_ok);
+    println!("  signature valid: {}", r.signature_valid);
+    println!("  covers document: {}", r.covers_document);
+    println!("  trust: {}", r.cert_trust);
 }
 
 fn cmd_sign_visible(cmd: SignVisibleCmd, quiet: bool) -> Result<()> {
