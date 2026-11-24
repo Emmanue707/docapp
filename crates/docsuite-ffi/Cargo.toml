@@ -10,5 +10,18 @@ authors.workspace = true
 crate-type = ["cdylib", "staticlib", "lib"]
 name = "docsuite_ffi"
 
+[features]
+default = []
+bindgen = ["uniffi/cli"]
+
 [dependencies]
 docsuite-core = { path = "../docsuite-core" }
+docsuite-pdf = { path = "../docsuite-pdf" }
+docsuite-ocr = { path = "../docsuite-ocr" }
+uniffi.workspace = true
+thiserror.workspace = true
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
