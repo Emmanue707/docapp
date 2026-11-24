@@ -36,25 +36,25 @@ pub fn verify_pdf_bytes(bytes: &[u8]) -> Result<Vec<SignatureReport>> {
         if let Ok((contents_start, contents_end)) = find_contents_hex_at(bytes, pos)
             && let Ok(br) = parse_byte_range_near(bytes, pos)
         {
-                let digest_input = match build_digest_input(bytes, (contents_start, contents_end)) {
-                    Ok(v) => v,
-                    Err(_) => {
-                        search = pos + 1;
-                        continue;
-                    }
-                };
-                let cms_der = match decode_contents_hex(bytes, contents_start, contents_end) {
-                    Ok(v) => v,
-                    Err(_) => {
-                        search = pos + 1;
-                        continue;
-                    }
-                };
-                if !cms_der.is_empty()
-                    && let Ok(report) = verify_one(&cms_der, &digest_input, &br, bytes.len())
-                {
-                    reports.push(report);
+            let digest_input = match build_digest_input(bytes, (contents_start, contents_end)) {
+                Ok(v) => v,
+                Err(_) => {
+                    search = pos + 1;
+                    continue;
                 }
+            };
+            let cms_der = match decode_contents_hex(bytes, contents_start, contents_end) {
+                Ok(v) => v,
+                Err(_) => {
+                    search = pos + 1;
+                    continue;
+                }
+            };
+            if !cms_der.is_empty()
+                && let Ok(report) = verify_one(&cms_der, &digest_input, &br, bytes.len())
+            {
+                reports.push(report);
+            }
         }
         search = pos + 1;
     }

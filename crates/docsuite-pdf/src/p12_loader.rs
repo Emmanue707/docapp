@@ -16,4 +16,3 @@ pub fn load_p12(bytes: &[u8], password: &str) -> Result<SigningIdentity> {
         "pkcs12 decryption not fully wired: use PEM key and certificate".into(),
     ))
 }
-
