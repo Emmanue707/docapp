@@ -5,7 +5,7 @@ use image::GenericImageView;
 
 use crate::types::{PlacedImage, RgbColor, TextLine, TextRun};
 
-pub const MAX_OCR_LONG_SIDE: u32 = 3000;
+pub const MAX_OCR_LONG_SIDE: u32 = 2200;
 
 pub fn decode_image_gray(bytes: &[u8]) -> Result<GrayImage> {
     let img = image::load_from_memory(bytes).map_err(|e| Error::Ocr(e.to_string()))?;

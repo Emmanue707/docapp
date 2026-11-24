@@ -1,7 +1,8 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use docsuite_core::throttle_progress;
-use docsuite_core::{CancelToken, Error, ProgressSink, Result, ThrottleState};
+use docsuite_core::{CancelToken, Error, JobRunner, Priority, ProgressSink, Result, ThrottleState};
 use docsuite_pdf::Pdf;
 
 use crate::PdfToWordOptions;
@@ -37,20 +38,43 @@ pub fn pdf_to_docx(
             docsuite_core::Progress::stage_static(i as u64, page_list.len() as u64, "pdf-to-docx"),
         );
         let page_id = pdf.page_id(pn)?;
-        let mut extracted = extract_page(doc, page_id)?;
-        let scanned = is_scanned(&extracted);
-        if scanned && opts.ocr_scanned {
-            let ocr = opts
-                .page_ocr
-                .as_ref()
-                .ok_or_else(|| Error::Ocr("ocr not configured".to_owned()))?;
-            if let Some(img) = extracted.images.first() {
-                let runs = ocr.ocr_placed(img, cancel)?;
-                apply_ocr_to_scanned_page(&mut extracted, runs, true);
-            }
-        }
+        let extracted = extract_page(doc, page_id)?;
         pages.push(extracted);
     }
+
+    if opts.ocr_scanned {
+        let ocr = opts
+            .page_ocr
+            .as_ref()
+            .ok_or_else(|| Error::Ocr("ocr not configured".to_owned()))?;
+        let runner = JobRunner::builder()
+            .workers(2)
+            .queue_capacity(pages.len())
+            .build();
+        let mut handles = Vec::new();
+        for (idx, page) in pages.iter().enumerate() {
+            if !is_scanned(page) {
+                continue;
+            }
+            let Some(img) = page.images.first().cloned() else {
+                continue;
+            };
+            let ocr = Arc::clone(ocr);
+            let cancel = cancel.clone();
+            let handle = runner.submit(Priority::Normal, move |_ctx| {
+                cancel.check()?;
+                let runs = ocr.ocr_placed(&img, &cancel)?;
+                Ok((idx, runs))
+            });
+            handles.push(handle);
+        }
+        for handle in handles {
+            cancel.check()?;
+            let (idx, runs) = handle.wait()?;
+            apply_ocr_to_scanned_page(&mut pages[idx], runs, true);
+        }
+    }
+
     let page_ids: Vec<_> = page_list
         .iter()
         .filter_map(|p| pdf.page_id(*p).ok())
