@@ -9,6 +9,7 @@ authors.workspace = true
 [features]
 default = []
 pdfium = ["dep:pdfium-render"]
+typst = ["dep:typst", "dep:typst-pdf", "dep:typst-kit", "dep:serde", "dep:serde_json"]
 
 [dependencies]
 docsuite-core = { path = "../docsuite-core" }
@@ -17,6 +18,12 @@ docsuite-pdf = { path = "../docsuite-pdf" }
 image = { workspace = true }
 lopdf = { workspace = true }
 pdfium-render = { version = "0.8", default-features = false, features = ["pdfium_latest", "image"], optional = true }
+quick-xml = { workspace = true }
+serde = { workspace = true, optional = true, features = ["std"] }
+serde_json = { workspace = true, optional = true }
+typst = { workspace = true, optional = true }
+typst-pdf = { workspace = true, optional = true }
+typst-kit = { workspace = true, optional = true }
 zip.workspace = true
 
 [dev-dependencies]
@@ -26,3 +33,12 @@ lopdf = { workspace = true }
 name = "pdf_image"
 path = "tests/pdf_image.rs"
 required-features = ["pdfium"]
+
+[[test]]
+name = "odt_docx_roundtrip"
+path = "tests/odt_docx_roundtrip.rs"
+
+[[test]]
+name = "docx_pdf"
+path = "tests/docx_pdf.rs"
+required-features = ["typst"]

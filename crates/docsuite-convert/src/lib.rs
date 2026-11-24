@@ -3,19 +3,28 @@
 #[macro_use]
 extern crate lopdf;
 
+pub mod doc;
 mod docx;
+pub mod docx_model;
+mod docx_read;
 pub mod extract;
 mod fonts;
 mod image_ocr;
 mod matrix;
 mod obfuscate;
 mod ocr_util;
+mod odt_read;
+mod odt_write;
+mod ooxf;
 mod page_ocr;
 #[cfg(feature = "pdfium")]
 mod pdf_image;
 mod pdf_text;
 mod pdf_word;
-mod types;
+pub mod types;
+#[cfg(feature = "typst")]
+pub mod typst_render;
+mod xml_util;
 
 use std::fs;
 use std::io::Read;
@@ -146,39 +155,136 @@ pub fn detect_format(path: &Path) -> Result<Format> {
 }
 
 pub fn odt_to_docx(
-    _input: &Path,
-    _output: &Path,
-    _cancel: &CancelToken,
+    input: &Path,
+    output: &Path,
+    cancel: &CancelToken,
     _progress: &Option<ProgressSink>,
 ) -> Result<()> {
-    Err(Error::Unsupported("odt_to_docx not implemented".to_owned()))
+    cancel.check()?;
+    let doc = odt_write::read_odt_document(input)?;
+    cancel.check()?;
+    docx_model::write_docx_from_document(output, &doc)
 }
 
 pub fn docx_to_odt(
-    _input: &Path,
-    _output: &Path,
-    _cancel: &CancelToken,
+    input: &Path,
+    output: &Path,
+    cancel: &CancelToken,
     _progress: &Option<ProgressSink>,
 ) -> Result<()> {
-    Err(Error::Unsupported("docx_to_odt not implemented".to_owned()))
+    cancel.check()?;
+    let doc = docx_model::read_docx_document(input)?;
+    cancel.check()?;
+    odt_write::write_odt_from_document(output, &doc)
 }
 
 pub fn docx_to_pdf(
-    _input: &Path,
-    _output: &Path,
-    _cancel: &CancelToken,
+    input: &Path,
+    output: &Path,
+    cancel: &CancelToken,
     _progress: &Option<ProgressSink>,
 ) -> Result<()> {
-    Err(Error::Unsupported("docx_to_pdf not implemented".to_owned()))
+    cancel.check()?;
+    #[cfg(feature = "typst")]
+    {
+        typst_render::read_document_to_pdf(input, output)
+    }
+    #[cfg(not(feature = "typst"))]
+    {
+        let _ = (input, output);
+        Err(Error::Unsupported(
+            "docx_to_pdf requires the typst feature".to_owned(),
+        ))
+    }
 }
 
 pub fn odt_to_pdf(
-    _input: &Path,
-    _output: &Path,
-    _cancel: &CancelToken,
+    input: &Path,
+    output: &Path,
+    cancel: &CancelToken,
     _progress: &Option<ProgressSink>,
 ) -> Result<()> {
-    Err(Error::Unsupported("odt_to_pdf not implemented".to_owned()))
+    cancel.check()?;
+    #[cfg(feature = "typst")]
+    {
+        typst_render::read_document_to_pdf(input, output)
+    }
+    #[cfg(not(feature = "typst"))]
+    {
+        let _ = (input, output);
+        Err(Error::Unsupported(
+            "odt_to_pdf requires the typst feature".to_owned(),
+        ))
+    }
+}
+
+pub fn image_to_odt(
+    input: &Path,
+    output: &Path,
+    cancel: &CancelToken,
+    _progress: &Option<ProgressSink>,
+) -> Result<()> {
+    cancel.check()?;
+    let bytes = fs::read(input).map_err(Error::from)?;
+    let kind = sniff_image_kind_bytes(&bytes);
+    let doc = docx_model::image_block_document(bytes, kind, &doc::PageSetup::default());
+    odt_write::write_odt_from_document(output, &doc)
+}
+
+pub fn image_to_docx_from_image(
+    input: &Path,
+    output: &Path,
+    cancel: &CancelToken,
+    _progress: &Option<ProgressSink>,
+) -> Result<()> {
+    cancel.check()?;
+    let bytes = fs::read(input).map_err(Error::from)?;
+    let kind = sniff_image_kind_bytes(&bytes);
+    let doc = docx_model::image_block_document(bytes, kind, &doc::PageSetup::default());
+    docx_model::write_docx_from_document(output, &doc)
+}
+
+fn sniff_image_kind_bytes(bytes: &[u8]) -> crate::types::ImageKind {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        crate::types::ImageKind::Png
+    } else {
+        crate::types::ImageKind::Jpeg
+    }
+}
+
+fn office_to_image_via_pdf(
+    input: &Path,
+    output: &Path,
+    format: Format,
+    cancel: &CancelToken,
+    progress: &Option<ProgressSink>,
+) -> Result<()> {
+    let tmp = std::env::temp_dir().join(format!("docsuite-pdf-{}.pdf", std::process::id()));
+    let fmt = detect_format(input)?;
+    match fmt {
+        Format::Docx => docx_to_pdf(input, &tmp, cancel, progress)?,
+        Format::Odt => odt_to_pdf(input, &tmp, cancel, progress)?,
+        _ => return Err(Error::Unsupported("expected office input".to_owned())),
+    }
+    cancel.check()?;
+    #[cfg(feature = "pdfium")]
+    {
+        let opts = PdfToImageOptions {
+            dpi: 150.0,
+            pages: None,
+            format,
+        };
+        pdf_to_image(&tmp, output, &opts, cancel, progress)?;
+        let _ = fs::remove_file(&tmp);
+        Ok(())
+    }
+    #[cfg(not(feature = "pdfium"))]
+    {
+        let _ = (output, format, tmp);
+        Err(Error::Unsupported(
+            "office to image requires pdfium".to_owned(),
+        ))
+    }
 }
 
 #[cfg(feature = "pdfium")]
@@ -242,17 +348,24 @@ pub fn convert(
             }
         }
         (Format::Jpeg | Format::Png | Format::WebP, Format::Docx) => {
-            let ocr = img_ocr.ok_or_else(|| Error::Ocr("ocr not configured".to_owned()))?;
-            image_to_docx(
-                input,
-                output,
-                &ImageOcrOptions {
-                    mode: opts.pdf_to_word.mode,
-                    ocr,
-                },
-                cancel,
-                progress,
-            )
+            if opts.pdf_to_word.ocr_scanned {
+                let ocr = img_ocr.ok_or_else(|| Error::Ocr("ocr not configured".to_owned()))?;
+                image_to_docx(
+                    input,
+                    output,
+                    &ImageOcrOptions {
+                        mode: opts.pdf_to_word.mode,
+                        ocr,
+                    },
+                    cancel,
+                    progress,
+                )
+            } else {
+                image_to_docx_from_image(input, output, cancel, progress)
+            }
+        }
+        (Format::Jpeg | Format::Png | Format::WebP, Format::Odt) => {
+            image_to_odt(input, output, cancel, progress)
         }
         (Format::Jpeg | Format::Png | Format::WebP, Format::Txt) => {
             let ocr = img_ocr.ok_or_else(|| Error::Ocr("ocr not configured".to_owned()))?;
@@ -288,6 +401,9 @@ pub fn convert(
                 let _ = output_fmt;
                 pdf_to_image(input, output, cancel, progress)
             }
+        }
+        (Format::Docx | Format::Odt, Format::Jpeg | Format::Png | Format::WebP) => {
+            office_to_image_via_pdf(input, output, output_fmt, cancel, progress)
         }
         _ => Err(Error::Unsupported(format!(
             "conversion {:?} -> {:?} is not supported",

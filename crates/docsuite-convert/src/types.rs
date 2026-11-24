@@ -46,7 +46,7 @@ pub struct TextLine {
     pub height: f64,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ImageKind {
     Jpeg,
     Png,
