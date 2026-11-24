@@ -2,6 +2,16 @@
 
 Local-first document toolkit: a small Rust engine for PDF work on desktop and Android. Nothing runs in the cloud.
 
+## Download
+
+Get ready-to-use builds from the [latest release](https://github.com/Emmanue707/docapp/releases/latest), no build needed:
+
+- **Android:** `docapp-<version>-universal.apk` (signed). Open it on the phone and allow installing from your browser or file manager.
+- **Linux x86_64:** `docapp-<version>-linux-x86_64.tar.gz`. Extract, then run `./docapp-desktop` (app) or `./docapp` (command line). Keep `libpdfium.so` next to them.
+- **Windows x86_64:** `docapp-<version>-windows-x86_64.zip`. Extract, then run `docapp-desktop.exe`. Keep `pdfium.dll` next to it.
+
+OCR models download on first use (`docapp models fetch`, or the button in the apps).
+
 ## Feature status
 
 | Area | Status |
@@ -11,7 +21,7 @@ Local-first document toolkit: a small Rust engine for PDF work on desktop and An
 | CLI field-type detection (OCR heuristics) | Done |
 | Image → PDF (JPEG/PNG) | Done |
 | Printed OCR (ocrs) | Planned |
-| Handwriting models | Planned (optional download) |
+| Handwriting OCR | Done (optional model download) |
 | ODT ↔ DOCX (shared document model) | Done |
 | Word/ODT → PDF (Typst, CLI/desktop) | Done |
 | Image → ODT/DOCX (fit page) | Done |
