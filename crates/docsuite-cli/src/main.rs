@@ -1,3 +1,5 @@
+mod models;
+mod ocr_cmd;
 mod util;
 
 use std::path::{Path, PathBuf};
@@ -5,9 +7,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use docsuite_convert::{
-    ConvertOptions, ImageToPdfOptions, PdfToWordMode, PdfToWordOptions, convert,
+    ConvertOptions, ImageToPdfOptions, PdfToWordMode, PdfToWordOptions, RecognizerPageOcr, convert,
 };
 use docsuite_core::CancelToken;
+use docsuite_ocr::OcrsRecognizer;
 use docsuite_ocr::predict_type;
 use docsuite_pdf::{
     ImagePageFit, PageRanges, Pdf, Rgb, SignatureStamp, add_image, add_text, crop, delete_pages,
@@ -41,6 +44,8 @@ enum Commands {
     SignVisible(SignVisibleCmd),
     DetectType(DetectTypeCmd),
     Convert(ConvertCmd),
+    Ocr(OcrCmd),
+    Models(ModelsCmd),
 }
 
 #[derive(Args)]
@@ -183,6 +188,37 @@ struct DetectTypeCmd {
 }
 
 #[derive(Args)]
+struct ModelsCmd {
+    #[command(subcommand)]
+    command: ModelsSub,
+    #[arg(long)]
+    dir: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
+enum ModelsSub {
+    Fetch,
+    Status,
+}
+
+#[derive(Args)]
+struct OcrCmd {
+    input: PathBuf,
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+    #[arg(long)]
+    pages: Option<String>,
+    #[arg(long, value_name = "X,Y,W,H")]
+    region: Option<String>,
+    #[arg(long)]
+    types: bool,
+    #[arg(long)]
+    models_dir: Option<PathBuf>,
+    #[command(flatten)]
+    force: ForceOpt,
+}
+
+#[derive(Args)]
 struct ConvertCmd {
     input: PathBuf,
     #[arg(short, long)]
@@ -197,6 +233,10 @@ struct ConvertCmd {
     no_embed_fonts: bool,
     #[arg(long)]
     pages: Option<String>,
+    #[arg(long)]
+    ocr: bool,
+    #[arg(long)]
+    models_dir: Option<PathBuf>,
     #[command(flatten)]
     force: ForceOpt,
 }
@@ -246,6 +286,8 @@ fn main() -> Result<()> {
         Commands::SignVisible(cmd) => cmd_sign_visible(cmd, cli.quiet),
         Commands::DetectType(cmd) => cmd_detect_type(cmd),
         Commands::Convert(cmd) => cmd_convert(cmd, cli.quiet),
+        Commands::Ocr(cmd) => cmd_ocr(cmd, cli.quiet),
+        Commands::Models(cmd) => cmd_models(cmd),
     }
 }
 
@@ -451,6 +493,30 @@ fn cmd_detect_type(cmd: DetectTypeCmd) -> Result<()> {
     Ok(())
 }
 
+fn cmd_models(cmd: ModelsCmd) -> Result<()> {
+    let dir = models::models_dir(cmd.dir);
+    match cmd.command {
+        ModelsSub::Fetch => models::cmd_models_fetch(&dir),
+        ModelsSub::Status => models::cmd_models_status(&dir),
+    }
+}
+
+fn cmd_ocr(cmd: OcrCmd, quiet: bool) -> Result<()> {
+    if let Some(out) = &cmd.output {
+        ensure_output(out, &[cmd.input.as_path()], cmd.force.force)?;
+    }
+    let models_dir = ocr_cmd::default_models_dir(cmd.models_dir);
+    ocr_cmd::cmd_ocr(ocr_cmd::OcrRunOptions {
+        input: cmd.input,
+        output: cmd.output,
+        pages: cmd.pages,
+        region: cmd.region,
+        types: cmd.types,
+        models_dir,
+        quiet,
+    })
+}
+
 fn cmd_convert(cmd: ConvertCmd, quiet: bool) -> Result<()> {
     ensure_output(&cmd.output, &[cmd.input.as_path()], cmd.force.force)?;
     let fit = if cmd.fit_letter {
@@ -469,12 +535,24 @@ fn cmd_convert(cmd: ConvertCmd, quiet: bool) -> Result<()> {
         Some(p) => Some(PageRanges::parse(p).map_err(|e| anyhow::anyhow!("{e}"))?),
         None => None,
     };
+    let page_ocr = if cmd.ocr {
+        let dir = models::models_dir(cmd.models_dir);
+        let rec = OcrsRecognizer::with_dir(&dir).map_err(|e| anyhow::anyhow!("{e}"))?;
+        Some(std::sync::Arc::new(RecognizerPageOcr {
+            recognizer: std::sync::Arc::new(rec),
+            highlight_low_confidence: false,
+        }) as std::sync::Arc<dyn docsuite_convert::PageOcr>)
+    } else {
+        None
+    };
     let opts = ConvertOptions {
         image: ImageToPdfOptions { fit },
         pdf_to_word: PdfToWordOptions {
             mode,
             embed_fonts: !cmd.no_embed_fonts,
             pages,
+            ocr_scanned: cmd.ocr,
+            page_ocr,
             ..PdfToWordOptions::default()
         },
     };
