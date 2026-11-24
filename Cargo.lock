@@ -1136,6 +1136,7 @@ version = "0.1.0"
 dependencies = [
  "docsuite-convert",
  "docsuite-core",
+ "docsuite-models",
  "docsuite-ocr",
  "docsuite-pdf",
  "thiserror 2.0.21",

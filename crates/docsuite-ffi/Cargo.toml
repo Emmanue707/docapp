@@ -20,6 +20,7 @@ docsuite-core = { path = "../docsuite-core" }
 docsuite-pdf = { path = "../docsuite-pdf" }
 docsuite-ocr = { path = "../docsuite-ocr" }
 docsuite-convert = { path = "../docsuite-convert" }
+docsuite-models = { path = "../docsuite-models", default-features = false }
 uniffi.workspace = true
 thiserror.workspace = true
 

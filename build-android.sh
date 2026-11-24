@@ -43,16 +43,21 @@ build_abi() {
   mkdir -p "$jni_dir"
 
   if command -v cargo-ndk >/dev/null 2>&1; then
-    cargo ndk --target "$abi" -p docsuite-ffi --platform "$API" build --release
+    cargo ndk --target "$abi" -p docsuite-ffi --platform "$API" build --release --features ocrs
   else
     local prebuilt="$NDK_HOME/toolchains/llvm/prebuilt"
     local host
     host="$(ls -1d "$prebuilt"/* | head -1)"
     local triple="$abi"
     local linker="$host/bin/${triple}${API}-clang"
-    export "CARGO_TARGET_${abi//-/_}_LINKER=$linker"
-    export "CC_${triple//-/_}=$linker"
-    flock /tmp/docapp-build.lock nice -n 10 cargo build -p docsuite-ffi --release --target "$abi" -j2
+    local cc_key="${triple//-/_}"
+    local linker_key="$(echo "$abi" | tr '[:lower:]' '[:upper:]' | tr '-' '_')"
+    export "CARGO_TARGET_${linker_key}_LINKER=$linker"
+    export "CC_${cc_key}=$linker"
+    export "CXX_${cc_key}=$linker"
+    export "AR_${cc_key}=$host/bin/llvm-ar"
+    export "RANLIB_${cc_key}=$host/bin/llvm-ranlib"
+    flock /tmp/docapp-build.lock nice -n 10 cargo build -p docsuite-ffi --release --target "$abi" --features ocrs -j2
   fi
 
   local lib="$ROOT/target/$abi/release/libdocsuite_ffi.so"
@@ -63,7 +68,9 @@ for abi in "${ABIS[@]}"; do
   build_abi "$abi"
 done
 
-flock /tmp/docapp-build.lock nice -n 10 cargo run -p docsuite-ffi --features bindgen --bin uniffi-bindgen -- \
-  generate --library --language kotlin --crate docsuite_ffi --out-dir "$JAVA_OUT"
+flock /tmp/docapp-build.lock nice -n 10 cargo build -p docsuite-ffi --features ocrs -j2
+LIB_SRC="$ROOT/target/debug/libdocsuite_ffi.so"
+flock /tmp/docapp-build.lock nice -n 10 cargo run -p docsuite-ffi --features bindgen,ocrs --bin uniffi-bindgen -- \
+  generate --library --language kotlin --crate docsuite_ffi --out-dir "$JAVA_OUT" "$LIB_SRC"
 
 echo "Android native libs and Kotlin bindings updated."
