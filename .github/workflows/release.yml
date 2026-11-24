@@ -1,0 +1,130 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PDFIUM_VER: "6721"
+  PDFIUM_SHA256_LINUX: "8783e0e46d846125227b7735d5625c2844a25ff315c0bf60a2834d457622b921"
+  PDFIUM_SHA256_WINDOWS: "f170ea7d64e7f94c5d82daafd8148365653475af8989686a4a1fdd60f97a43e3"
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config clang libssl-dev \
+            libxkbcommon-dev libasound2-dev libwayland-dev libX11-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - name: pdfium
+        env:
+          PDFIUM_VER: ${{ env.PDFIUM_VER }}
+        run: |
+          curl -fL -o pdfium.tgz \
+            "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F${PDFIUM_VER}/pdfium-linux-x64.tgz"
+          echo "${{ env.PDFIUM_SHA256_LINUX }} pdfium.tgz" | sha256sum -c -
+          tar xzf pdfium.tgz
+          mkdir -p bundle/lib
+          cp lib/libpdfium.so bundle/lib/
+      - run: cargo build --release -p docsuite-cli
+      - run: cargo build --release -p docapp-desktop
+      - name: pack
+        run: |
+          V=${GITHUB_REF_NAME#v}
+          mkdir -p "docapp-$V-linux-x86_64"
+          cp target/release/docapp target/release/docapp-desktop README.md LICENSE-MIT LICENSE-APACHE MODELS.md \
+            bundle/lib/libpdfium.so "docapp-$V-linux-x86_64/"
+          tar czf "docapp-$V-linux-x86_64.tar.gz" "docapp-$V-linux-x86_64"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: docapp-*-linux-x86_64.tar.gz
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: pdfium
+        shell: bash
+        env:
+          PDFIUM_VER: ${{ env.PDFIUM_VER }}
+        run: |
+          curl -fL -o pdfium-win.tgz \
+            "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F${PDFIUM_VER}/pdfium-win-x64.tgz"
+          echo "${{ env.PDFIUM_SHA256_WINDOWS }} pdfium-win.tgz" | sha256sum -c -
+          tar xzf pdfium-win.tgz
+      - run: cargo build --release -p docsuite-cli -p docapp-desktop
+      - name: pack
+        shell: bash
+        run: |
+          V=${GITHUB_REF_NAME#v}
+          mkdir -p "docapp-$V-windows-x86_64"
+          cp target/release/docapp.exe target/release/docapp-desktop.exe README.md LICENSE-MIT LICENSE-APACHE MODELS.md \
+            bin/pdfium.dll "docapp-$V-windows-x86_64/"
+          7z a "docapp-$V-windows-x86_64.zip" "docapp-$V-windows-x86_64"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: docapp-*-windows-x86_64.zip
+
+  apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.DOCAPP_KEYSTORE_B64 }}
+        run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/docapp.jks"
+      - name: build
+        working-directory: apps/android
+        env:
+          DOCAPP_KEYSTORE: ${{ runner.temp }}/docapp.jks
+          DOCAPP_KEYSTORE_PASSWORD: ${{ secrets.DOCAPP_KEYSTORE_PASSWORD }}
+          DOCAPP_KEY_ALIAS: ${{ secrets.DOCAPP_KEY_ALIAS }}
+          DOCAPP_KEY_PASSWORD: ${{ secrets.DOCAPP_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease
+      - name: check signature
+        run: |
+          APK=$(ls apps/android/app/build/outputs/apk/release/app-universal-release.apk)
+          "$(ls -d "$ANDROID_HOME"/build-tools/* | tail -1)/apksigner" verify "$APK"
+          cp "$APK" "docapp-${GITHUB_REF_NAME#v}-universal.apk"
+      - run: rm -f "$RUNNER_TEMP/docapp.jks"
+        if: always()
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: docapp-*-universal.apk
+
+  publish:
+    needs: [linux, windows, apk]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES=$RUNNER_TEMP/notes.md
+          cat "docs/release-notes/$GITHUB_REF_NAME.md" > "$NOTES"
+          gh release create "$GITHUB_REF_NAME" dist/* --title "docapp $GITHUB_REF_NAME" --notes-file "$NOTES" --verify-tag
