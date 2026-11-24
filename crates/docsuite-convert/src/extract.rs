@@ -117,7 +117,7 @@ pub fn extract_page(doc: &Document, page_id: ObjectId) -> Result<ExtractedPage> 
         resources,
         Matrix::IDENTITY,
     )?;
-    ctx.text = merge_into_lines(&ctx.raw_runs, &gs.fonts);
+    ctx.text = merge_into_lines_page(&ctx.raw_runs, &gs.fonts, width);
     Ok(ExtractedPage {
         width,
         height,
@@ -519,6 +519,15 @@ fn show_string(ctx: &mut ExtractCtx, gs: &mut GfxState, bytes: &[u8], x_offset: 
     let hz = gs.h_scale / 100.0;
     let mut i = 0usize;
     let mut tj_extra = x_offset;
+    let latex_font = {
+        let n = font.name.to_ascii_lowercase();
+        n.contains("cmr")
+            || n.contains("cmti")
+            || n.contains("ptmr")
+            || n.contains("ptmb")
+            || n.contains("nimbusrom")
+    };
+    let mut word_kern = latex_font && tj_extra > 0.24;
     while i < bytes.len() {
         let (glyph, step) = if font.is_cid_font() && i + 1 < bytes.len() {
             (&bytes[i..i + 2], 2)
@@ -526,7 +535,11 @@ fn show_string(ctx: &mut ExtractCtx, gs: &mut GfxState, bytes: &[u8], x_offset: 
             (&bytes[i..i + 1], 1)
         };
         i += step;
-        let text = font.decode_glyph(glyph);
+        let mut text = font.decode_glyph(glyph);
+        if word_kern && !text.is_empty() {
+            text = format!(" {text}");
+            word_kern = false;
+        }
         if text.is_empty() && !hidden {
             continue;
         }
@@ -535,7 +548,8 @@ fn show_string(ctx: &mut ExtractCtx, gs: &mut GfxState, bytes: &[u8], x_offset: 
         tj_extra = 0.0;
         let font_size = gs.font_size * combined.scale_x() * hz;
         let w_em = font.glyph_width_em(glyph);
-        let gw = w_em / 1000.0 * font_size;
+        let adv_em = w_em / 1000.0 * hz + gs.char_space;
+        let gw = adv_em * font_size;
         let (top_x, top_y) = ctx.pdf_y_to_top(ux, uy);
         let ascent = font.ascent_pt(font_size);
         ctx.push_text_run(TextRun {
@@ -554,7 +568,7 @@ fn show_string(ctx: &mut ExtractCtx, gs: &mut GfxState, bytes: &[u8], x_offset: 
             confidence: 1.0,
             highlight: false,
         });
-        let mut adv = w_em / 1000.0 * hz + gs.char_space;
+        let mut adv = adv_em;
         let is_space = !font.is_cid_font() && glyph.first() == Some(&32);
         if is_space {
             adv += gs.word_space;
@@ -775,7 +789,32 @@ fn line_baseline(line: &[TextRun]) -> f64 {
     line.first().map(|r| r.y).unwrap_or(0.0)
 }
 
+fn margin_line_number(run: &TextRun, page_w: f64) -> bool {
+    if run.x > page_w * 0.12 {
+        return false;
+    }
+    let t = run.text.trim();
+    t.len() == 3 && t.chars().all(|c| c.is_ascii_digit())
+}
+
+#[allow(dead_code)]
 fn merge_into_lines(raw: &[TextRun], fonts: &HashMap<String, PdfFont>) -> Vec<TextLine> {
+    merge_into_lines_inner(raw, fonts, 0.0)
+}
+
+pub(crate) fn merge_into_lines_page(
+    raw: &[TextRun],
+    fonts: &HashMap<String, PdfFont>,
+    page_w: f64,
+) -> Vec<TextLine> {
+    merge_into_lines_inner(raw, fonts, page_w)
+}
+
+fn merge_into_lines_inner(
+    raw: &[TextRun],
+    fonts: &HashMap<String, PdfFont>,
+    page_w: f64,
+) -> Vec<TextLine> {
     let visible: Vec<_> = raw
         .iter()
         .filter(|r| !r.hidden && !r.text.is_empty())
@@ -785,6 +824,15 @@ fn merge_into_lines(raw: &[TextRun], fonts: &HashMap<String, PdfFont>) -> Vec<Te
         return Vec::new();
     }
     let mut work: Vec<TextRun> = visible;
+    for i in 0..work.len().saturating_sub(1) {
+        let size = work[i].font_size.max(work[i + 1].font_size);
+        if (work[i + 1].y - work[i].y).abs() <= size * 0.35 {
+            let step = work[i + 1].x - work[i].x;
+            if step > 0.01 {
+                work[i].width = step;
+            }
+        }
+    }
     for run in &mut work {
         let snap = run.font_size * 0.15;
         if snap > 0.01 {
@@ -793,7 +841,19 @@ fn merge_into_lines(raw: &[TextRun], fonts: &HashMap<String, PdfFont>) -> Vec<Te
     }
     let mut groups: Vec<Vec<TextRun>> = Vec::new();
     for run in work {
+        if page_w > 0.0 && margin_line_number(&run, page_w) {
+            groups.push(vec![run]);
+            continue;
+        }
         if let Some(group) = groups.last_mut() {
+            if page_w > 0.0 {
+                if let Some(first) = group.first() {
+                    if margin_line_number(first, page_w) != margin_line_number(&run, page_w) {
+                        groups.push(vec![run]);
+                        continue;
+                    }
+                }
+            }
             let base_y = line_baseline(group);
             let size = group
                 .iter()
@@ -810,29 +870,33 @@ fn merge_into_lines(raw: &[TextRun], fonts: &HashMap<String, PdfFont>) -> Vec<Te
                     continue;
                 }
                 let gap = run.x - (last.x + last.width);
+                let step = run.x - last.x;
                 let space_w = fonts
                     .get(&last.font_key)
                     .map(|f| f.space_width(last.font_size))
                     .unwrap_or(last.font_size * 0.25);
-                if gap > size * 0.35 {
+                if step > size * 0.35 || gap > size * 0.35 {
                     groups.push(vec![run]);
                     continue;
                 }
-                if !gap_needs_space(last, &run, gap, size) && gap <= size * 0.06 {
+                let need_sp = gap_needs_space(last, &run, gap, size);
+                if !need_sp && gap <= size * 0.06 {
                     let mut merged = last.clone();
                     merged.text.push_str(&run.text);
                     merged.width = run.x + run.width - merged.x;
                     let idx = group.len() - 1;
                     group[idx] = merged;
-                } else if gap <= size * 0.55 {
+                } else if need_sp || (gap > size * 0.08 && step > size * 0.2) {
                     let mut merged = last.clone();
-                    merged.text.push(' ');
-                    merged.width += space_w.min(gap.max(0.0));
+                    if !run.text.starts_with(' ') {
+                        merged.text.push(' ');
+                        merged.width += space_w.min(gap.max(0.0));
+                    }
                     merged.text.push_str(&run.text);
                     merged.width = run.x + run.width - merged.x;
                     let idx = group.len() - 1;
                     group[idx] = merged;
-                } else if gap_needs_space(last, &run, gap, size) {
+                } else if need_sp {
                     let mut nr = run;
                     nr.text = format!(" {}", nr.text);
                     nr.x -= space_w.min(gap.max(0.0));
@@ -1098,6 +1162,45 @@ pub fn collect_fonts(
     }
     let _ = pages;
     out
+}
+
+#[cfg(test)]
+pub(crate) fn extract_raw_runs_for_test(doc: &Document, page_id: ObjectId) -> Result<Vec<TextRun>> {
+    let page = docsuite_pdf::page_attr::materialize_page_attributes(doc, page_id)
+        .map_err(|e| Error::Pdf(e.to_string()))?;
+    let mediabox = box_array(&page, b"MediaBox")?;
+    let cropbox = box_array(&page, b"CropBox").unwrap_or(mediabox);
+    let rotate = dict_int(&page, b"Rotate") as i32;
+    let (width, height) = page_size(cropbox, rotate);
+    let fonts = load_page_fonts(doc, &page)?;
+    let mut ctx = ExtractCtx {
+        page_w: width,
+        page_h: height,
+        text: Vec::new(),
+        images: Vec::new(),
+        vectors: Vec::new(),
+        raw_runs: Vec::new(),
+        current_path: Vec::new(),
+        path_start: None,
+        cur_point: None,
+    };
+    let resources = page.get(b"Resources").ok();
+    let mut gs = GfxState::new(fonts);
+    let content_bytes = doc.get_page_content(page_id);
+    let content = Content::decode(&content_bytes).map_err(|e| Error::Pdf(e.to_string()))?;
+    interpret_ops(
+        doc,
+        &mut ctx,
+        &mut gs,
+        &content.operations,
+        resources,
+        Matrix::IDENTITY,
+    )?;
+    Ok(ctx
+        .raw_runs
+        .into_iter()
+        .filter(|r| !r.hidden && !r.text.is_empty())
+        .collect())
 }
 
 use crate::types::FontEmbed;
