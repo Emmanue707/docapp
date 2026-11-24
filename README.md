@@ -12,7 +12,11 @@ Local-first document toolkit: a small Rust engine for PDF work on desktop and An
 | Image → PDF (JPEG/PNG) | Done |
 | Printed OCR (ocrs) | Planned |
 | Handwriting models | Planned (optional download) |
-| Word/ODT → PDF (Typst) | Planned |
+| ODT ↔ DOCX (shared document model) | Done |
+| Word/ODT → PDF (Typst, CLI/desktop) | Done |
+| Image → ODT/DOCX (fit page) | Done |
+| DOCX/ODT → PNG (via PDF + pdfium) | Done (CLI/desktop) |
+| Word/ODT → PDF (Android FFI) | Coming soon (Typst size) |
 | PDF → Word (exact-look & editable) | Done |
 
 ## Architecture
@@ -60,6 +64,9 @@ cargo build --release -p docsuite-cli
 ./target/release/docapp split in.pdf --ranges 1-3,5 --single -o all.pdf
 ./target/release/docapp convert scan.png -o scan.pdf
 ./target/release/docapp convert in.pdf -o out.docx --mode exact --pages 1-3
+./target/release/docapp convert doc.odt -o doc.docx
+./target/release/docapp convert doc.docx -o doc.pdf
+./target/release/docapp convert scan.png -o page.odt
 ./target/release/docapp detect-type "ek@example.com"
 ```
 
