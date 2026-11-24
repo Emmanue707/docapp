@@ -22,7 +22,7 @@ authors = ["Emmanuel Kokele"]
 thiserror = { version = "2", default-features = false }
 anyhow = { version = "1", default-features = false }
 lopdf = { version = "0.47", default-features = false }
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 clap = { version = "4", default-features = false, features = ["derive", "std"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 uniffi = { version = "0.28", default-features = false }
@@ -31,6 +31,11 @@ eframe = { version = "0.31", default-features = false, features = [
     "wayland",
     "x11",
 ] }
+ocrs = { version = "0.14", default-features = false, features = ["onnx"] }
+rten = { version = "0.28", default-features = false, features = ["onnx_format"] }
+rten-imageproc = { version = "0.28", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [profile.release]
 opt-level = "z"
