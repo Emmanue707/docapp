@@ -12,5 +12,16 @@ path = "src/main.rs"
 
 [dependencies]
 docsuite-core = { path = "../docsuite-core" }
+docsuite-pdf = { path = "../docsuite-pdf" }
+docsuite-ocr = { path = "../docsuite-ocr" }
+docsuite-convert = { path = "../docsuite-convert" }
 clap.workspace = true
-anyhow.workspace = true
+anyhow = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+lopdf = { workspace = true }
+image = { workspace = true }
+
+[[test]]
+name = "cli_integration"
+path = "tests/cli_integration.rs"
