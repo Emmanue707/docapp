@@ -21,4 +21,15 @@ jobs:
           java-version: 17
           cache: gradle
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r28c
+      - name: native libs
+        working-directory: .
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: ./build-android.sh
       - run: ./gradlew assembleDebug testDebugUnitTest

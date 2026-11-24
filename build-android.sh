@@ -74,3 +74,21 @@ flock /tmp/docapp-build.lock nice -n 10 cargo run -p docsuite-ffi --features bin
   generate --library --language kotlin --crate docsuite_ffi --out-dir "$JAVA_OUT" "$LIB_SRC"
 
 echo "Android native libs and Kotlin bindings updated."
+python3 - "$JNI_LIBS/arm64-v8a/libdocsuite_ffi.so" "$JAVA_OUT/uniffi/docsuite_ffi/docsuite_ffi.kt" << 'PY'
+import re, subprocess, sys
+so, kt = sys.argv[1], sys.argv[2]
+text = open(kt, encoding="utf-8").read()
+needed = sorted(set(re.findall(r"fun\s+((?:uniffi|ffi)_docsuite_ffi_\w+)\s*\(", text)))
+exported = set()
+out = subprocess.check_output(["nm", "-D", "--defined-only", so], text=True)
+for line in out.splitlines():
+    parts = line.split()
+    if len(parts) >= 3 and parts[1] == "T":
+        exported.add(parts[2])
+missing = [n for n in needed if n not in exported]
+if missing:
+    sys.stderr.write("libdocsuite_ffi.so is missing symbols the Kotlin bindings need:\n")
+    sys.stderr.write("\n".join(missing) + "\n")
+    sys.exit(1)
+print(f"native lib exports match Kotlin bindings ({len(needed)} UniFFI symbols)")
+PY
