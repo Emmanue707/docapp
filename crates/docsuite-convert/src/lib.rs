@@ -8,6 +8,7 @@ mod docx;
 pub mod docx_model;
 mod docx_read;
 pub mod extract;
+mod font_encode;
 mod fonts;
 mod image_ocr;
 mod matrix;
