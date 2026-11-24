@@ -36,7 +36,9 @@ pub fn minimal_pdf(pages: u32, page_rotate: Option<i32>) -> Pdf {
             "Parent" => pages_id,
             "Contents" => content_id,
         };
-        if i == 0 && let Some(deg) = page_rotate {
+        if i == 0
+            && let Some(deg) = page_rotate
+        {
             page.set("Rotate", Object::Integer(deg as i64));
         }
         let page_id = doc.add_object(page);

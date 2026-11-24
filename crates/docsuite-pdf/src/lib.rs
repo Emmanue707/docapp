@@ -3,6 +3,8 @@ extern crate lopdf;
 
 mod annotate;
 mod crop;
+mod image_pdf;
+mod info;
 mod lopdf_map;
 mod merge;
 mod page_attr;
@@ -20,6 +22,8 @@ mod testutil;
 
 pub use annotate::{Rgb, TextAnnotationMode, add_image, add_text, add_text_annotation};
 pub use crop::{PdfRect, crop};
+pub use image_pdf::{ImagePageFit, pdf_from_image_bytes, pdf_from_image_file};
+pub use info::{PageSize, PdfInfo, pdf_info};
 pub use merge::merge;
 pub use pdf::Pdf;
 pub use ranges::PageRanges;

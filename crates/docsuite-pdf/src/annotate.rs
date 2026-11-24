@@ -88,7 +88,7 @@ fn jpeg_dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
     Ok(img.dimensions())
 }
 
-fn build_image_stream(bytes: &[u8]) -> Result<(Stream, u32, u32)> {
+pub fn build_image_stream(bytes: &[u8]) -> Result<(Stream, u32, u32)> {
     if bytes.starts_with(&[0xFF, 0xD8]) {
         let (w, h) = jpeg_dimensions(bytes)?;
         let stream = Stream::new(
