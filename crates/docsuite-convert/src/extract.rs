@@ -6,6 +6,7 @@ use lopdf::{Document, Object, ObjectId, Stream};
 
 use crate::fonts::PdfFont;
 use crate::matrix::Matrix;
+use crate::page_rotate::{apply_display_rotation, page_size_display, page_size_user};
 use crate::types::{
     ExtractedPage, ImageKind, PathPoint, PathSegment, PlacedImage, RgbColor, TextLine, TextRun,
     VectorPath,
@@ -70,6 +71,7 @@ struct ExtractCtx {
     current_path: Vec<PathSegment>,
     path_start: Option<PathPoint>,
     cur_point: Option<PathPoint>,
+    last_image_ctm: Option<Matrix>,
 }
 
 impl ExtractCtx {
@@ -92,11 +94,12 @@ pub fn extract_page(doc: &Document, page_id: ObjectId) -> Result<ExtractedPage> 
     let mediabox = box_array(&page, b"MediaBox")?;
     let cropbox = box_array(&page, b"CropBox").unwrap_or(mediabox);
     let rotate = dict_int(&page, b"Rotate") as i32;
-    let (width, height) = page_size(cropbox, rotate);
+    let (user_w, user_h) = page_size_user(cropbox);
+    let (width, height) = page_size_display(cropbox, rotate);
     let fonts = load_page_fonts(doc, &page)?;
     let mut ctx = ExtractCtx {
-        page_w: width,
-        page_h: height,
+        page_w: user_w,
+        page_h: user_h,
         text: Vec::new(),
         images: Vec::new(),
         vectors: Vec::new(),
@@ -104,6 +107,7 @@ pub fn extract_page(doc: &Document, page_id: ObjectId) -> Result<ExtractedPage> 
         current_path: Vec::new(),
         path_start: None,
         cur_point: None,
+        last_image_ctm: None,
     };
     let resources = page.get(b"Resources").ok();
     let mut gs = GfxState::new(fonts);
@@ -117,25 +121,20 @@ pub fn extract_page(doc: &Document, page_id: ObjectId) -> Result<ExtractedPage> 
         resources,
         Matrix::IDENTITY,
     )?;
-    ctx.text = merge_into_lines_page(&ctx.raw_runs, &gs.fonts, width);
-    Ok(ExtractedPage {
+    ctx.text = merge_into_lines_page(&ctx.raw_runs, &gs.fonts, user_w);
+    let image_ctm = ctx.last_image_ctm;
+    let mut out = ExtractedPage {
         width,
         height,
-        rotate,
+        rotate: 0,
+        source_rotate: rotate,
+        crop_box: cropbox,
         text: ctx.text,
         images: ctx.images,
         vectors: ctx.vectors,
-    })
-}
-
-fn page_size(box4: [f64; 4], rotate: i32) -> (f64, f64) {
-    let w = (box4[2] - box4[0]).abs();
-    let h = (box4[3] - box4[1]).abs();
-    if rotate == 90 || rotate == 270 {
-        (h, w)
-    } else {
-        (w, h)
-    }
+    };
+    apply_display_rotation(&mut out, cropbox, rotate, image_ctm);
+    Ok(out)
 }
 
 fn box_array(page: &lopdf::Dictionary, key: &[u8]) -> Result<[f64; 4]> {
@@ -613,13 +612,12 @@ fn handle_xobject(
         .unwrap_or_default();
     if subtype == "Image" {
         if let Some(img) = decode_image_stream(&stream)? {
-            let (w, h) = image_size(&stream.dict)?;
-            let m = gs.ctm;
+            let m = form_matrix.concat(gs.ctm);
             let corners = [
                 m.transform(0.0, 0.0),
-                m.transform(w, 0.0),
-                m.transform(0.0, h),
-                m.transform(w, h),
+                m.transform(1.0, 0.0),
+                m.transform(0.0, 1.0),
+                m.transform(1.0, 1.0),
             ];
             let min_x = corners
                 .iter()
@@ -638,6 +636,7 @@ fn handle_xobject(
                 .map(|(_, y)| *y)
                 .fold(f64::NEG_INFINITY, f64::max);
             let (tx, ty) = ctx.pdf_y_to_top(min_x, max_y);
+            ctx.last_image_ctm = Some(m);
             ctx.images.push(PlacedImage {
                 bytes: img.0,
                 kind: img.1,
@@ -646,6 +645,7 @@ fn handle_xobject(
                 width: (max_x - min_x).abs(),
                 height: (max_y - min_y).abs(),
                 behind: false,
+                orient_fallback: true,
             });
         }
     } else if subtype == "Form" {
@@ -676,12 +676,6 @@ fn handle_xobject(
         )?;
     }
     Ok(())
-}
-
-fn image_size(dict: &lopdf::Dictionary) -> Result<(f64, f64)> {
-    let w = dict_int(dict, b"Width") as f64;
-    let h = dict_int(dict, b"Height") as f64;
-    Ok((w, h))
 }
 
 fn decode_image_stream(stream: &Stream) -> Result<Option<(Vec<u8>, ImageKind)>> {
@@ -1170,12 +1164,11 @@ pub(crate) fn extract_raw_runs_for_test(doc: &Document, page_id: ObjectId) -> Re
         .map_err(|e| Error::Pdf(e.to_string()))?;
     let mediabox = box_array(&page, b"MediaBox")?;
     let cropbox = box_array(&page, b"CropBox").unwrap_or(mediabox);
-    let rotate = dict_int(&page, b"Rotate") as i32;
-    let (width, height) = page_size(cropbox, rotate);
+    let (user_w, user_h) = page_size_user(cropbox);
     let fonts = load_page_fonts(doc, &page)?;
     let mut ctx = ExtractCtx {
-        page_w: width,
-        page_h: height,
+        page_w: user_w,
+        page_h: user_h,
         text: Vec::new(),
         images: Vec::new(),
         vectors: Vec::new(),
@@ -1183,6 +1176,7 @@ pub(crate) fn extract_raw_runs_for_test(doc: &Document, page_id: ObjectId) -> Re
         current_path: Vec::new(),
         path_start: None,
         cur_point: None,
+        last_image_ctm: None,
     };
     let resources = page.get(b"Resources").ok();
     let mut gs = GfxState::new(fonts);
