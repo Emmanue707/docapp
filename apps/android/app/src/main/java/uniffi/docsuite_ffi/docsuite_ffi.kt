@@ -795,6 +795,12 @@ internal open class UniffiVTableCallbackInterfaceProgressListener(
 
 
 
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -841,15 +847,21 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_docsuite_ffi_fn_func_extract_text_layer(`path`: RustBuffer.ByValue,`page`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_docsuite_ffi_fn_func_handwriting_model_filename(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_docsuite_ffi_fn_func_handwriting_model_sha256(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_docsuite_ffi_fn_func_handwriting_model_url(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_docsuite_ffi_fn_func_image_to_pdf_ffi(`input`: RustBuffer.ByValue,`output`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    fun uniffi_docsuite_ffi_fn_func_make_searchable(`path`: RustBuffer.ByValue,`out`: RustBuffer.ByValue,`modelsDir`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_docsuite_ffi_fn_func_make_searchable(`path`: RustBuffer.ByValue,`out`: RustBuffer.ByValue,`modelsDir`: RustBuffer.ByValue,`handwriting`: Byte,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_docsuite_ffi_fn_func_merge(`paths`: RustBuffer.ByValue,`output`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_docsuite_ffi_fn_func_models_status(`dir`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_docsuite_ffi_fn_func_ocr_image(`path`: RustBuffer.ByValue,`modelsDir`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_docsuite_ffi_fn_func_ocr_image(`path`: RustBuffer.ByValue,`modelsDir`: RustBuffer.ByValue,`handwriting`: Byte,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_docsuite_ffi_fn_func_odt_to_docx(`path`: RustBuffer.ByValue,`out`: RustBuffer.ByValue,`cancel`: Pointer,`progress`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -1009,6 +1021,12 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_docsuite_ffi_checksum_func_extract_text_layer(
     ): Short
+    fun uniffi_docsuite_ffi_checksum_func_handwriting_model_filename(
+    ): Short
+    fun uniffi_docsuite_ffi_checksum_func_handwriting_model_sha256(
+    ): Short
+    fun uniffi_docsuite_ffi_checksum_func_handwriting_model_url(
+    ): Short
     fun uniffi_docsuite_ffi_checksum_func_image_to_pdf_ffi(
     ): Short
     fun uniffi_docsuite_ffi_checksum_func_make_searchable(
@@ -1096,10 +1114,19 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_docsuite_ffi_checksum_func_extract_text_layer() != 50820.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_docsuite_ffi_checksum_func_handwriting_model_filename() != 9216.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_docsuite_ffi_checksum_func_handwriting_model_sha256() != 24635.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_docsuite_ffi_checksum_func_handwriting_model_url() != 45999.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_docsuite_ffi_checksum_func_image_to_pdf_ffi() != 24125.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_docsuite_ffi_checksum_func_make_searchable() != 8396.toShort()) {
+    if (lib.uniffi_docsuite_ffi_checksum_func_make_searchable() != 40119.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_docsuite_ffi_checksum_func_merge() != 59495.toShort()) {
@@ -1108,7 +1135,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_docsuite_ffi_checksum_func_models_status() != 34592.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_docsuite_ffi_checksum_func_ocr_image() != 23424.toShort()) {
+    if (lib.uniffi_docsuite_ffi_checksum_func_ocr_image() != 51104.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_docsuite_ffi_checksum_func_odt_to_docx() != 237.toShort()) {
@@ -1724,7 +1751,8 @@ public object FfiConverterTypeDetectTypeResult: FfiConverterRustBuffer<DetectTyp
 
 data class ModelsStatus (
     var `detectionPresent`: kotlin.Boolean, 
-    var `recognitionPresent`: kotlin.Boolean
+    var `recognitionPresent`: kotlin.Boolean, 
+    var `handwritingPresent`: kotlin.Boolean
 ) {
     
     companion object
@@ -1738,17 +1766,20 @@ public object FfiConverterTypeModelsStatus: FfiConverterRustBuffer<ModelsStatus>
         return ModelsStatus(
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
     override fun allocationSize(value: ModelsStatus) = (
             FfiConverterBoolean.allocationSize(value.`detectionPresent`) +
-            FfiConverterBoolean.allocationSize(value.`recognitionPresent`)
+            FfiConverterBoolean.allocationSize(value.`recognitionPresent`) +
+            FfiConverterBoolean.allocationSize(value.`handwritingPresent`)
     )
 
     override fun write(value: ModelsStatus, buf: ByteBuffer) {
             FfiConverterBoolean.write(value.`detectionPresent`, buf)
             FfiConverterBoolean.write(value.`recognitionPresent`, buf)
+            FfiConverterBoolean.write(value.`handwritingPresent`, buf)
     }
 }
 
@@ -2430,6 +2461,33 @@ public object FfiConverterSequenceTypeSignatureReportFfi: FfiConverterRustBuffer
     )
     }
     
+ fun `handwritingModelFilename`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_docsuite_ffi_fn_func_handwriting_model_filename(
+        _status)
+}
+    )
+    }
+    
+ fun `handwritingModelSha256`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_docsuite_ffi_fn_func_handwriting_model_sha256(
+        _status)
+}
+    )
+    }
+    
+ fun `handwritingModelUrl`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_docsuite_ffi_fn_func_handwriting_model_url(
+        _status)
+}
+    )
+    }
+    
 
     @Throws(DocsuiteException::class) fun `imageToPdfFfi`(`input`: kotlin.String, `output`: kotlin.String, `cancel`: CancelHandle, `progress`: ProgressListener?)
         = 
@@ -2440,11 +2498,11 @@ public object FfiConverterSequenceTypeSignatureReportFfi: FfiConverterRustBuffer
     
     
 
-    @Throws(DocsuiteException::class) fun `makeSearchable`(`path`: kotlin.String, `out`: kotlin.String, `modelsDir`: kotlin.String, `cancel`: CancelHandle, `progress`: ProgressListener?)
+    @Throws(DocsuiteException::class) fun `makeSearchable`(`path`: kotlin.String, `out`: kotlin.String, `modelsDir`: kotlin.String, `handwriting`: kotlin.Boolean, `cancel`: CancelHandle, `progress`: ProgressListener?)
         = 
     uniffiRustCallWithError(DocsuiteException) { _status ->
     UniffiLib.INSTANCE.uniffi_docsuite_ffi_fn_func_make_searchable(
-        FfiConverterString.lower(`path`),FfiConverterString.lower(`out`),FfiConverterString.lower(`modelsDir`),FfiConverterTypeCancelHandle.lower(`cancel`),FfiConverterOptionalTypeProgressListener.lower(`progress`),_status)
+        FfiConverterString.lower(`path`),FfiConverterString.lower(`out`),FfiConverterString.lower(`modelsDir`),FfiConverterBoolean.lower(`handwriting`),FfiConverterTypeCancelHandle.lower(`cancel`),FfiConverterOptionalTypeProgressListener.lower(`progress`),_status)
 }
     
     
@@ -2467,11 +2525,11 @@ public object FfiConverterSequenceTypeSignatureReportFfi: FfiConverterRustBuffer
     }
     
 
-    @Throws(DocsuiteException::class) fun `ocrImage`(`path`: kotlin.String, `modelsDir`: kotlin.String, `cancel`: CancelHandle, `progress`: ProgressListener?): kotlin.String {
+    @Throws(DocsuiteException::class) fun `ocrImage`(`path`: kotlin.String, `modelsDir`: kotlin.String, `handwriting`: kotlin.Boolean, `cancel`: CancelHandle, `progress`: ProgressListener?): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCallWithError(DocsuiteException) { _status ->
     UniffiLib.INSTANCE.uniffi_docsuite_ffi_fn_func_ocr_image(
-        FfiConverterString.lower(`path`),FfiConverterString.lower(`modelsDir`),FfiConverterTypeCancelHandle.lower(`cancel`),FfiConverterOptionalTypeProgressListener.lower(`progress`),_status)
+        FfiConverterString.lower(`path`),FfiConverterString.lower(`modelsDir`),FfiConverterBoolean.lower(`handwriting`),FfiConverterTypeCancelHandle.lower(`cancel`),FfiConverterOptionalTypeProgressListener.lower(`progress`),_status)
 }
     )
     }

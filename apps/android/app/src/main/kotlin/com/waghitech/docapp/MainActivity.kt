@@ -9,10 +9,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -100,6 +102,7 @@ private fun DocappRoot(onPersistUri: (Uri) -> Unit) {
     var cancelHandle by remember { mutableStateOf<CancelHandle?>(null) }
     var workJob by remember { mutableStateOf<Job?>(null) }
     var dialog by remember { mutableStateOf<String?>(null) }
+    var handwritingOcr by remember { mutableStateOf(false) }
     var signPassword by remember { mutableStateOf("") }
     var signP12 by remember { mutableStateOf<File?>(null) }
 
@@ -329,33 +332,103 @@ private fun DocappRoot(onPersistUri: (Uri) -> Unit) {
                         dialog = "models"
                         return@ToolsSheet
                     }
-                    runJob {
-                        val cancel = cancelHandle ?: return@runJob
-                        if (UriFiles.isPdf(mime)) {
-                            val out = engine.workCopy(src, "search")
-                            engine.searchable(
-                                src.absolutePath,
-                                out.absolutePath,
-                                models.modelsDir.absolutePath,
-                                cancel,
-                                progressListener,
-                            ).onSuccess { workFile = out }
-                        } else {
-                            engine.ocr(
-                                src.absolutePath,
-                                models.modelsDir.absolutePath,
-                                cancel,
-                                progressListener,
-                            )
-                        }
-                    }
+                    dialog = "ocr_opts"
                 }
                 else -> dialog = "Soon: ${tool.name}"
             }
         },
     )
 
-    if (dialog == "models") {
+    if (dialog == "ocr_opts" && workFile != null) {
+        val src = workFile!!
+        AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text(stringResource(R.string.ocr)) },
+            text = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked = handwritingOcr,
+                        onCheckedChange = { handwritingOcr = it },
+                    )
+                    Text(stringResource(R.string.handwriting_ocr))
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        dialog = null
+                        if (handwritingOcr && !models.handwritingReady()) {
+                            dialog = "handwriting_models"
+                            return@TextButton
+                        }
+                        val file = src
+                        runJob {
+                            val cancel = cancelHandle ?: return@runJob
+                            val hw = handwritingOcr
+                            if (UriFiles.isPdf(mime)) {
+                                val out = engine.workCopy(file, "search")
+                                engine.searchable(
+                                    file.absolutePath,
+                                    out.absolutePath,
+                                    models.modelsDir.absolutePath,
+                                    hw,
+                                    cancel,
+                                    progressListener,
+                                ).onSuccess { workFile = out }
+                            } else {
+                                engine.ocr(
+                                    file.absolutePath,
+                                    models.modelsDir.absolutePath,
+                                    hw,
+                                    cancel,
+                                    progressListener,
+                                )
+                            }
+                        }
+                    },
+                ) { Text(stringResource(R.string.run_ocr)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { dialog = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    } else if (dialog == "handwriting_models") {
+        var dlProgress by remember { mutableFloatStateOf(0f) }
+        AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text(stringResource(R.string.download_handwriting_model)) },
+            text = {
+                LinearProgressIndicator(progress = { dlProgress }, modifier = Modifier.fillMaxWidth())
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            models.downloadHandwriting { done, total ->
+                                dlProgress =
+                                    if (total > 0) {
+                                        done.toFloat() / total.toFloat()
+                                    } else {
+                                        0f
+                                    }
+                            }
+                            dialog = "ocr_opts"
+                        }
+                    },
+                ) { Text(stringResource(R.string.download_handwriting_model)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { dialog = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    } else if (dialog == "models") {
         var dlProgress by remember { mutableFloatStateOf(0f) }
         AlertDialog(
             onDismissRequest = { dialog = null },

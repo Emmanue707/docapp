@@ -12,7 +12,7 @@ name = "docsuite_ffi"
 
 [features]
 default = []
-ocrs = ["docsuite-ocr/ocrs"]
+ocrs = ["docsuite-ocr/ocrs", "docsuite-ocr/htr"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]

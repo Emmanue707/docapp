@@ -7,6 +7,9 @@ import uniffi.docsuite_ffi.detectionModelFilename
 import uniffi.docsuite_ffi.detectionModelSha256
 import uniffi.docsuite_ffi.detectionModelUrl
 import uniffi.docsuite_ffi.modelsStatus
+import uniffi.docsuite_ffi.handwritingModelFilename
+import uniffi.docsuite_ffi.handwritingModelSha256
+import uniffi.docsuite_ffi.handwritingModelUrl
 import uniffi.docsuite_ffi.recognitionModelFilename
 import uniffi.docsuite_ffi.recognitionModelSha256
 import uniffi.docsuite_ffi.recognitionModelUrl
@@ -21,6 +24,11 @@ class ModelDownloader(private val context: Context) {
     fun ready(): Boolean {
         val st = modelsStatus(modelsDir.absolutePath)
         return st.`detectionPresent` && st.`recognitionPresent`
+    }
+
+    fun handwritingReady(): Boolean {
+        val st = modelsStatus(modelsDir.absolutePath)
+        return st.`handwritingPresent`
     }
 
     suspend fun download(
@@ -47,6 +55,26 @@ class ModelDownloader(private val context: Context) {
             doneFiles++
             onProgress(doneFiles.toLong(), totalFiles.toLong())
         }
+        Result.success(Unit)
+    }
+
+    suspend fun downloadHandwriting(
+        onProgress: (done: Long, total: Long) -> Unit,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val dir = modelsDir
+        if (!dir.exists() && !dir.mkdirs()) {
+            return@withContext Result.failure(IllegalStateException("mkdir models"))
+        }
+        val url = handwritingModelUrl()
+        val name = handwritingModelFilename()
+        val sha = handwritingModelSha256()
+        val dest = File(dir, name)
+        if (dest.isFile && dest.inputStream().use { UriFiles.streamHash(it, sha) }) {
+            onProgress(1L, 1L)
+            return@withContext Result.success(Unit)
+        }
+        downloadOne(url, dest, sha, onProgress, 0, 1)
+        onProgress(1L, 1L)
         Result.success(Unit)
     }
 

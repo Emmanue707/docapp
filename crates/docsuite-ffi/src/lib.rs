@@ -11,9 +11,11 @@ use docsuite_convert::{
 };
 use docsuite_core::{CancelToken, Error, Progress, ProgressSink};
 use docsuite_models::{
-    DETECTION_FILE, DETECTION_MODEL_URL, DETECTION_SHA256, RECOGNITION_FILE, RECOGNITION_MODEL_URL,
-    RECOGNITION_SHA256,
+    DETECTION_FILE, DETECTION_MODEL_URL, DETECTION_SHA256, HANDWRITING_FILE, HANDWRITING_MODEL_URL,
+    HANDWRITING_SHA256, RECOGNITION_FILE, RECOGNITION_MODEL_URL, RECOGNITION_SHA256,
 };
+#[cfg(feature = "ocrs")]
+use docsuite_ocr::open_recognizer;
 use docsuite_ocr::{FieldType, predict_type, status as models_status_fn};
 use docsuite_pdf::{
     DigitalSignOptions, PageRanges, Pdf, PdfRect, PdfSubFilter, Rgb, SignatureReport,
@@ -23,8 +25,6 @@ use docsuite_pdf::{
 
 #[cfg(feature = "ocrs")]
 use docsuite_convert::{PdfTextOptions, RecognizerPageOcr, image_to_txt, pdf_to_searchable_pdf};
-#[cfg(feature = "ocrs")]
-use docsuite_ocr::OcrsRecognizer;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn docsuite_version() -> *const c_char {
@@ -89,6 +89,7 @@ pub struct PdfRectFfi {
 pub struct ModelsStatus {
     pub detection_present: bool,
     pub recognition_present: bool,
+    pub handwriting_present: bool,
 }
 
 impl From<docsuite_ocr::ModelStatus> for ModelsStatus {
@@ -96,6 +97,7 @@ impl From<docsuite_ocr::ModelStatus> for ModelsStatus {
         Self {
             detection_present: s.detection,
             recognition_present: s.recognition,
+            handwriting_present: s.handwriting,
         }
     }
 }
@@ -468,14 +470,15 @@ pub fn ffi_pdf_to_docx(
 pub fn ocr_image(
     path: String,
     models_dir: String,
+    handwriting: bool,
     cancel: Arc<CancelHandle>,
     progress: Option<Box<dyn ProgressListener>>,
 ) -> Result<String, DocsuiteError> {
     let token = token_from(&cancel);
     let sink = progress_sink(progress);
-    let rec = OcrsRecognizer::with_dir(Path::new(&models_dir))?;
+    let rec = open_recognizer(Path::new(&models_dir), handwriting)?;
     let ocr = RecognizerPageOcr {
-        recognizer: Arc::new(rec),
+        recognizer: rec,
         highlight_low_confidence: false,
     };
     let tmp = std::env::temp_dir().join(format!("docsuite-ocr-{}.txt", std::process::id()));
@@ -493,14 +496,15 @@ pub fn make_searchable(
     path: String,
     out: String,
     models_dir: String,
+    handwriting: bool,
     cancel: Arc<CancelHandle>,
     progress: Option<Box<dyn ProgressListener>>,
 ) -> Result<(), DocsuiteError> {
     let token = token_from(&cancel);
     let sink = progress_sink(progress);
-    let rec = OcrsRecognizer::with_dir(Path::new(&models_dir))?;
+    let rec = open_recognizer(Path::new(&models_dir), handwriting)?;
     let ocr = Arc::new(RecognizerPageOcr {
-        recognizer: Arc::new(rec),
+        recognizer: rec,
         highlight_low_confidence: false,
     });
     let opts = PdfTextOptions {
@@ -563,6 +567,21 @@ pub fn detection_model_filename() -> String {
 #[uniffi::export]
 pub fn recognition_model_filename() -> String {
     RECOGNITION_FILE.to_owned()
+}
+
+#[uniffi::export]
+pub fn handwriting_model_url() -> String {
+    HANDWRITING_MODEL_URL.to_owned()
+}
+
+#[uniffi::export]
+pub fn handwriting_model_sha256() -> String {
+    HANDWRITING_SHA256.to_owned()
+}
+
+#[uniffi::export]
+pub fn handwriting_model_filename() -> String {
+    HANDWRITING_FILE.to_owned()
 }
 
 #[derive(uniffi::Record)]

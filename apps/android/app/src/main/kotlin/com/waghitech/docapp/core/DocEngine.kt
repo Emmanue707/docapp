@@ -176,17 +176,19 @@ class DocEngine {
     suspend fun ocr(
         path: String,
         modelsDir: String,
+        handwriting: Boolean,
         cancel: CancelHandle,
         progress: ProgressListener?,
-    ): Result<String> = onIo { ocrImage(path, modelsDir, cancel, progress) }
+    ): Result<String> = onIo { ocrImage(path, modelsDir, handwriting, cancel, progress) }
 
     suspend fun searchable(
         path: String,
         out: String,
         modelsDir: String,
+        handwriting: Boolean,
         cancel: CancelHandle,
         progress: ProgressListener?,
-    ): Result<Unit> = onIo { makeSearchable(path, out, modelsDir, cancel, progress) }
+    ): Result<Unit> = onIo { makeSearchable(path, out, modelsDir, handwriting, cancel, progress) }
 
     suspend fun pageText(path: String, page: Int): Result<String> =
         onIo { extractTextLayer(path, page.toUInt()) }

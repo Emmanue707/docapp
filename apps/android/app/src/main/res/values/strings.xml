@@ -29,6 +29,9 @@
     <string name="about_title">About</string>
     <string name="about_name">Waghitech Docapp</string>
     <string name="download_models">Download OCR models (12 MB)</string>
+    <string name="download_handwriting_model">Download handwriting model (12 MB)</string>
+    <string name="handwriting_ocr">Handwriting</string>
+    <string name="run_ocr">Run OCR</string>
     <string name="models_ready">OCR models ready</string>
     <string name="exact_look">Exact look</string>
     <string name="editable">Editable</string>
