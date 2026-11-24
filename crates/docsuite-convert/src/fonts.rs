@@ -219,6 +219,8 @@ pub struct PdfFont {
     cid_map: HashMap<u32, char>,
     to_unicode: HashMap<u32, char>,
     is_cid: bool,
+    cid_widths: HashMap<u32, f64>,
+    cid_default_width: f64,
     default_width: f64,
     ascent_em: f64,
     space_em: f64,
@@ -257,6 +259,8 @@ impl PdfFont {
             .unwrap_or_default();
         let mut cid_map = HashMap::new();
         let mut to_unicode = HashMap::new();
+        let mut cid_widths = HashMap::new();
+        let mut cid_default_width = 1000.0;
         let is_cid = subtype == "Type0";
         if is_cid {
             if let Ok(desc_ref) = dict.get(b"DescendantFonts") {
@@ -265,6 +269,9 @@ impl PdfFont {
                         if let Ok(id) = first.as_reference() {
                             if let Ok(desc) = doc.get_dictionary(id) {
                                 parse_cid_widths(desc, &mut cid_map);
+                                let (dw, cw) = read_cid_w_table(desc);
+                                cid_default_width = dw;
+                                cid_widths = cw;
                             }
                         }
                     }
@@ -296,6 +303,8 @@ impl PdfFont {
             cid_map,
             to_unicode,
             is_cid,
+            cid_widths,
+            cid_default_width,
             default_width: 500.0,
             ascent_em,
             space_em,
@@ -306,6 +315,10 @@ impl PdfFont {
 
     pub fn display_family(&self) -> &str {
         self.embed_family.as_deref().unwrap_or(&self.family)
+    }
+
+    pub fn is_cid_font(&self) -> bool {
+        self.is_cid
     }
 
     pub fn ascent_pt(&self, font_size: f64) -> f64 {
@@ -380,22 +393,29 @@ impl PdfFont {
         self.default_width / 1000.0 * font_size
     }
 
-    pub fn string_width(&self, bytes: &[u8], font_size: f64) -> f64 {
-        if self.is_cid {
-            let n = bytes.len() / 2;
-            let mut w = 0.0;
-            for i in 0..n {
-                let code = u32::from(bytes[i * 2]) * 256 + u32::from(bytes[i * 2 + 1]);
-                let gw = self
-                    .to_unicode
-                    .get(&code)
-                    .map(|_| self.default_width)
-                    .unwrap_or(self.default_width);
-                w += gw / 1000.0 * font_size;
-            }
-            return w;
+    pub fn cid_code_width_em(&self, code: u32) -> f64 {
+        self.cid_widths
+            .get(&code)
+            .copied()
+            .unwrap_or(self.cid_default_width)
+    }
+
+    pub fn glyph_width_em(&self, bytes: &[u8]) -> f64 {
+        if self.is_cid && bytes.len() >= 2 {
+            let code = u32::from(bytes[0]) * 256 + u32::from(bytes[1]);
+            return self.cid_code_width_em(code);
         }
-        bytes.iter().map(|b| self.glyph_width(*b, font_size)).sum()
+        if let Some(&b) = bytes.first() {
+            return self.glyph_width(b, 1000.0);
+        }
+        self.default_width
+    }
+
+    pub fn decode_glyph(&self, bytes: &[u8]) -> String {
+        if bytes.is_empty() {
+            return String::new();
+        }
+        self.decode_string(bytes)
     }
 
     pub fn embed_info(&self, key: &str) -> Option<FontEmbed> {
@@ -567,6 +587,78 @@ fn hex_to_char(hex: &str) -> Option<char> {
         char::from_u32(code)
     } else {
         None
+    }
+}
+
+fn read_cid_w_table(desc: &Dictionary) -> (f64, HashMap<u32, f64>) {
+    let dw = desc
+        .get(b"DW")
+        .ok()
+        .and_then(|o| o.as_i64().ok())
+        .unwrap_or(1000) as f64;
+    let mut widths = HashMap::new();
+    if let Ok(wobj) = desc.get(b"W") {
+        if let Ok(arr) = wobj.as_array() {
+            parse_w_array(arr, &mut widths);
+        }
+    }
+    (dw, widths)
+}
+
+fn pdf_real(obj: &Object) -> Option<f64> {
+    match obj {
+        Object::Real(v) => Some(f64::from(*v)),
+        Object::Integer(v) => Some(*v as f64),
+        _ => None,
+    }
+}
+
+fn parse_w_array(arr: &[Object], out: &mut HashMap<u32, f64>) {
+    let mut i = 0;
+    while i < arr.len() {
+        let cid = match &arr[i] {
+            Object::Integer(v) => *v as u32,
+            Object::Real(v) => f64::from(*v) as u32,
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+        i += 1;
+        if i >= arr.len() {
+            break;
+        }
+        if let Ok(sub) = arr[i].as_array() {
+            for (k, item) in sub.iter().enumerate() {
+                if let Ok(w) = item.as_i64() {
+                    out.insert(cid + k as u32, w as f64);
+                } else if let Some(w) = pdf_real(item) {
+                    out.insert(cid + k as u32, w);
+                }
+            }
+            i += 1;
+        } else if let Ok(end) = arr[i].as_i64() {
+            if i + 1 < arr.len() {
+                if let Ok(w) = arr[i + 1].as_i64() {
+                    for c in cid..=(end as u32) {
+                        out.insert(c, w as f64);
+                    }
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            } else {
+                i += 1;
+            }
+        } else if let Ok(w) = arr[i].as_i64() {
+            out.insert(cid, w as f64);
+            i += 1;
+        } else if let Some(w) = pdf_real(&arr[i]) {
+            out.insert(cid, w);
+            i += 1;
+        } else {
+            i += 1;
+        }
     }
 }
 
