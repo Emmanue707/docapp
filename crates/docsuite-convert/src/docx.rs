@@ -49,6 +49,7 @@ pub fn write_docx(
     write_document_rels(&mut zip, opts, fonts, pages)?;
     write_styles(&mut zip, opts)?;
     write_settings(&mut zip, opts, embed_fonts)?;
+    write_numbering(&mut zip, opts)?;
     write_font_table(&mut zip, opts, embed_fonts, fonts)?;
     write_core(&mut zip, opts)?;
     write_app(&mut zip, opts)?;
@@ -115,6 +116,7 @@ fn write_content_types(
     xml.push_str(r#"<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>"#);
     xml.push_str(r#"<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>"#);
     xml.push_str(r#"<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>"#);
+    xml.push_str(r#"<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>"#);
     xml.push_str(r#"<Override PartName="/word/fontTable.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"/>"#);
     xml.push_str(r#"<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>"#);
     xml.push_str(r#"<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>"#);
@@ -292,7 +294,7 @@ fn text_line_anchor(line: &TextLine, ids: &mut DocPrGen, z: u32) -> String {
             let prev = &line.runs[ri - 1];
             let gap = run.x - (prev.x + prev.width);
             let size = prev.font_size.max(run.font_size);
-            if gap > size * 0.06 {
+            if gap > size * 0.25 || gap > (prev.width + run.width) * 0.25 {
                 inner.push_str(r#"<w:r><w:t xml:space="preserve"> </w:t></w:r>"#);
             }
         }
@@ -449,9 +451,28 @@ fn path_bounds(vp: &VectorPath) -> (f64, f64, f64, f64) {
 
 fn editable_page_body(page: &ExtractedPage, pi: usize, ids: &mut DocPrGen) -> String {
     let mut out = String::new();
+    let tbl = detect_table(page);
+    let table_rect = if tbl.is_some() {
+        table_grid_bounds(page)
+    } else {
+        None
+    };
+    if let Some(tbl) = tbl {
+        out.push_str(&tbl);
+    }
     let columns = column_bounds(&page.text, page.width);
     let multi_col = columns.len() > 1;
-    let mut lines: Vec<&TextLine> = page.text.iter().collect();
+    let mut lines: Vec<&TextLine> = page
+        .text
+        .iter()
+        .filter(|l| {
+            if let Some((ref h_ys, ref v_xs)) = table_rect {
+                !line_in_table_rect(l, h_ys, v_xs)
+            } else {
+                true
+            }
+        })
+        .collect();
     lines.sort_by(|a, b| {
         if multi_col {
             let col_a = column_index(a.x, &columns);
@@ -584,7 +605,7 @@ fn editable_line_inner(line: &TextLine) -> (String, String) {
             let prev = runs[ri - 1];
             let gap = run.x - (prev.x + prev.width);
             let size = prev.font_size.max(run.font_size);
-            if gap > size * 0.06 {
+            if gap > size * 0.25 || gap > (prev.width + run.width) * 0.25 {
                 inner.push_str(r#"<w:r><w:t xml:space="preserve"> </w:t></w:r>"#);
             }
         }
@@ -594,7 +615,6 @@ fn editable_line_inner(line: &TextLine) -> (String, String) {
     (ppr_extra, inner)
 }
 
-#[allow(dead_code)]
 fn line_in_table_rect(line: &TextLine, h_ys: &[f64], v_xs: &[f64]) -> bool {
     if h_ys.len() < 2 || v_xs.len() < 2 {
         return false;
@@ -607,7 +627,6 @@ fn line_in_table_rect(line: &TextLine, h_ys: &[f64], v_xs: &[f64]) -> bool {
     line.x >= x0 - 4.0 && line.x + line.width <= x1 + 8.0 && cy >= y0 - 4.0 && cy <= y1
 }
 
-#[allow(dead_code)]
 fn detect_table(page: &ExtractedPage) -> Option<String> {
     let mut h_ys: Vec<f64> = Vec::new();
     let mut v_xs: Vec<f64> = Vec::new();
@@ -679,7 +698,6 @@ fn detect_table(page: &ExtractedPage) -> Option<String> {
     Some(tbl)
 }
 
-#[allow(dead_code)]
 fn table_grid_bounds(page: &ExtractedPage) -> Option<(Vec<f64>, Vec<f64>)> {
     let mut h_ys: Vec<f64> = Vec::new();
     let mut v_xs: Vec<f64> = Vec::new();
@@ -741,8 +759,9 @@ fn write_document_rels(
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
     );
     xml.push_str(r#"<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>"#);
-    xml.push_str(r#"<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>"#);
-    xml.push_str(r#"<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable" Target="fontTable.xml"/>"#);
+    xml.push_str(r#"<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>"#);
+    xml.push_str(r#"<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>"#);
+    xml.push_str(r#"<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable" Target="fontTable.xml"/>"#);
     for (i, _font) in fonts.iter().enumerate() {
         xml.push_str(&format!(
             r#"<Relationship Id="rIdFont{i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="fonts/font{i}.odttf"/>"#
@@ -774,6 +793,20 @@ fn write_styles(zip: &mut ZipWriter<std::fs::File>, opts: SimpleFileOptions) -> 
 </w:style>
 </w:styles>"#;
     zip.start_file("word/styles.xml", opts).map_err(zip_err)?;
+    zip.write_all(xml.as_bytes())
+        .map_err(docsuite_core::Error::from)?;
+    Ok(())
+}
+
+fn write_numbering(zip: &mut ZipWriter<std::fs::File>, opts: SimpleFileOptions) -> Result<()> {
+    let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/><w:lvlJc w:val="left"/></w:lvl></w:abstractNum>
+<w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/><w:lvlJc w:val="left"/></w:lvl></w:abstractNum>
+<w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
+</w:numbering>"#;
+    zip.start_file("word/numbering.xml", opts)
+        .map_err(zip_err)?;
     zip.write_all(xml.as_bytes())
         .map_err(docsuite_core::Error::from)?;
     Ok(())
