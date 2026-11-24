@@ -474,6 +474,7 @@ fun DocappRoot(onPersistUri: (Uri) -> Unit) {
                         onOpen = { openDoc.launch(arrayOf("application/pdf", "image/*", "*/*")) },
                         onRecent = { entry -> openUri(Uri.parse(entry.uri)) },
                         onTool = { startHomeTool(it) },
+                        working = busy,
                     )
                 Screen.Viewer -> {
                     val file = workFile

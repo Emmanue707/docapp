@@ -1,8 +1,9 @@
 package com.waghitech.docapp.ui
 
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
@@ -21,6 +22,7 @@ data class SavedOutput(
     val canOpenInApp: Boolean,
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ResultCard(
     output: SavedOutput,
@@ -37,8 +39,12 @@ fun ResultCard(
                 .testTag("result_card"),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(output.label, modifier = Modifier.testTag("result_card_text"))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                output.label,
+                modifier = Modifier.fillMaxWidth().testTag("result_card_text"),
+                style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = onOpen) {
                     Text(stringResource(R.string.open_output))
                 }
