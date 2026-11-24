@@ -122,7 +122,7 @@ impl OcrsRecognizer {
         Ok(Self::new(OcrModels::from_dir(dir)?))
     }
 
-    fn with_engine<R>(&self, f: impl FnOnce(&OcrEngine) -> Result<R>) -> Result<R> {
+    pub(crate) fn with_engine<R>(&self, f: impl FnOnce(&OcrEngine) -> Result<R>) -> Result<R> {
         let mut guard = self
             .engine
             .lock()

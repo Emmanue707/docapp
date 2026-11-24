@@ -1601,6 +1601,7 @@ dependencies = [
  "ocrs",
  "rten",
  "rten-imageproc",
+ "rten-tensor",
  "sha2",
 ]
 

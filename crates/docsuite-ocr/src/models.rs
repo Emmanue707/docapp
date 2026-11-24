@@ -7,21 +7,29 @@ use sha2::Digest;
 
 pub const DETECTION_FILE: &str = "text-detection.onnx";
 pub const RECOGNITION_FILE: &str = "text-recognition.onnx";
+pub const HANDWRITING_FILE: &str = "handwriting-recognition.onnx";
 
 pub const DETECTION_SHA256: &str =
     "a917b23dbd9524b465df7e922641b3ff2981623df4ded5a0234004ef2fee7cfe";
 pub const RECOGNITION_SHA256: &str =
     "86c145c2edb96c8caed5b1ebb8f44d706408922211451c309c625157dd6061c5";
+pub const HANDWRITING_SHA256: &str =
+    "9dd7990130954fd4190ab14cfdb58455485e4843f8b829f4598a00b54023ced0";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelStatus {
     pub detection: bool,
     pub recognition: bool,
+    pub handwriting: bool,
 }
 
 impl ModelStatus {
     pub fn ready(&self) -> bool {
         self.detection && self.recognition
+    }
+
+    pub fn handwriting_ready(&self) -> bool {
+        self.handwriting
     }
 }
 
@@ -54,11 +62,17 @@ pub fn model_paths(dir: &Path) -> (PathBuf, PathBuf) {
     (dir.join(DETECTION_FILE), dir.join(RECOGNITION_FILE))
 }
 
+pub fn handwriting_path(dir: &Path) -> (PathBuf, &'static str) {
+    (dir.join(HANDWRITING_FILE), HANDWRITING_SHA256)
+}
+
 pub fn status(dir: &Path) -> ModelStatus {
     let (det, rec) = model_paths(dir);
+    let (htr, _) = handwriting_path(dir);
     ModelStatus {
         detection: det.is_file(),
         recognition: rec.is_file(),
+        handwriting: htr.is_file(),
     }
 }
 
@@ -97,6 +111,16 @@ pub fn ensure_models(dir: &Path) -> Result<()> {
     verify_file(&det, DETECTION_SHA256)?;
     verify_file(&rec, RECOGNITION_SHA256)?;
     Ok(())
+}
+
+pub fn ensure_handwriting(dir: &Path) -> Result<()> {
+    let (path, sha) = handwriting_path(dir);
+    if !path.is_file() {
+        return Err(Error::Ocr(
+            "handwriting model missing; download it from models settings".to_owned(),
+        ));
+    }
+    verify_file(&path, sha)
 }
 
 #[cfg(test)]
