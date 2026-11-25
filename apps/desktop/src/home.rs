@@ -9,20 +9,34 @@ impl DocApp {
     pub(crate) fn show_home(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         let pad = 28.0;
         ui.add_space(pad);
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.heading(
+                    egui::RichText::new("Waghitech Docapp")
+                        .size(26.0)
+                        .color(ACCENT),
+                );
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new("Open a document or pick a tool below").size(14.0));
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let label = if self.dark_mode { "Light" } else { "Dark" };
+                if ui.button(label).clicked() {
+                    self.toggle_theme(ctx);
+                }
+            });
+        });
+        ui.add_space(20.0);
         ui.vertical_centered(|ui| {
-            ui.heading(
-                egui::RichText::new("Waghitech Docapp")
-                    .size(26.0)
-                    .color(ACCENT),
-            );
-            ui.add_space(6.0);
-            ui.label("Open a document or pick a tool below");
-            ui.add_space(16.0);
             if ui
                 .add(
-                    egui::Button::new(egui::RichText::new("  Open file…  ").size(16.0))
-                        .fill(ACCENT)
-                        .min_size(egui::vec2(160.0, 40.0)),
+                    egui::Button::new(
+                        egui::RichText::new("Open file")
+                            .size(16.0)
+                            .color(egui::Color32::WHITE),
+                    )
+                    .fill(ACCENT)
+                    .min_size(egui::vec2(168.0, 42.0)),
                 )
                 .clicked()
                 && let Some(path) = rfd::FileDialog::new()
@@ -31,62 +45,83 @@ impl DocApp {
             {
                 self.open_path(path);
             }
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("Or drop a file here").weak().italics());
         });
         ui.add_space(pad);
         self.show_tool_grid(ui);
-        ui.add_space(12.0);
+        ui.add_space(16.0);
         self.show_recent_list(ui);
         ui.add_space(pad);
         let _ = ctx;
     }
 
     fn show_tool_grid(&mut self, ui: &mut egui::Ui) {
-        let cols = if ui.available_width() > 720.0 {
+        let gap = 14.0;
+        let avail = ui.available_width();
+        let cols = if avail > 720.0 {
             4
-        } else if ui.available_width() > 480.0 {
+        } else if avail > 480.0 {
             3
         } else {
             2
         };
-        egui::Grid::new("home_tools")
-            .num_columns(cols)
-            .spacing(egui::vec2(14.0, 14.0))
-            .show(ui, |ui| {
-                for (i, &tool) in home_tools().iter().enumerate() {
-                    let size = egui::vec2(148.0, 88.0);
-                    let frame = egui::Frame::new()
+        let cols = cols.clamp(2, 4);
+        let cell_w = ((avail - gap * (cols as f32 - 1.0)) / cols as f32)
+            .floor()
+            .max(120.0);
+        let cell_h = 96.0;
+        let tools = home_tools();
+        let mut index = 0usize;
+        while index < tools.len() {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
+                for _ in 0..cols {
+                    if index >= tools.len() {
+                        break;
+                    }
+                    let tool = tools[index];
+                    let card = egui::Frame::new()
                         .fill(ui.style().visuals.panel_fill)
                         .stroke(egui::Stroke::new(
                             1.0_f32,
                             ui.style().visuals.widgets.noninteractive.bg_stroke.color,
                         ))
                         .corner_radius(egui::CornerRadius::same(10))
-                        .inner_margin(egui::Margin::same(10));
-                    let card = frame.show(ui, |ui| {
-                        ui.set_min_size(size);
-                        ui.vertical_centered(|ui| {
-                            paint_tool_icon(ui, tool, 28.0);
-                            ui.add_space(4.0);
-                            ui.label(egui::RichText::new(tool.label()).size(12.5));
+                        .inner_margin(egui::Margin::same(10))
+                        .show(ui, |ui| {
+                            ui.set_width(cell_w);
+                            ui.set_height(cell_h);
+                            ui.vertical_centered(|ui| {
+                                paint_tool_icon(ui, tool, 28.0);
+                                ui.add_space(6.0);
+                                ui.add(
+                                    egui::Label::new(egui::RichText::new(tool.label()).size(12.5))
+                                        .wrap_mode(egui::TextWrapMode::Wrap)
+                                        .halign(egui::Align::Center),
+                                );
+                            });
                         });
-                    });
                     if card.response.interact(egui::Sense::click()).clicked() {
                         self.start_home_tool(tool);
                     }
-                    if (i + 1) % cols == 0 {
-                        ui.end_row();
-                    }
+                    index += 1;
                 }
             });
+            if index < tools.len() {
+                ui.add_space(gap);
+            }
+        }
     }
 
     fn show_recent_list(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.label(egui::RichText::new("Recent files").strong());
+        ui.add_space(6.0);
         if self.recent.is_empty() {
+            ui.label(egui::RichText::new("No recent files").weak());
             return;
         }
-        ui.separator();
-        ui.label(egui::RichText::new("Recent").strong());
-        ui.add_space(4.0);
         for r in self.recent.clone() {
             let name = r
                 .file_name()
