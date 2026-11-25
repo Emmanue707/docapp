@@ -7,57 +7,51 @@ use crate::tools::{DocTool, home_tools};
 
 impl DocApp {
     pub(crate) fn show_home(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        let pad = 28.0;
-        ui.add_space(pad);
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            let pad = 12.0;
+            ui.add_space(4.0);
+            ui.vertical_centered(|ui| {
                 ui.heading(
                     egui::RichText::new("Waghitech Docapp")
-                        .size(26.0)
+                        .size(24.0)
                         .color(ACCENT),
                 );
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new("Open a document or pick a tool below").size(14.0));
+                ui.add_space(2.0);
+                ui.label(egui::RichText::new("Open a document or pick a tool below").size(13.5));
             });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let label = if self.dark_mode { "Light" } else { "Dark" };
-                if ui.button(label).clicked() {
-                    self.toggle_theme(ctx);
-                }
-            });
-        });
-        ui.add_space(20.0);
-        ui.vertical_centered(|ui| {
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("Open file")
-                            .size(16.0)
-                            .color(egui::Color32::WHITE),
+            ui.add_space(12.0);
+            ui.vertical_centered(|ui| {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("Open file")
+                                .size(16.0)
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(ACCENT)
+                        .min_size(egui::vec2(168.0, 42.0)),
                     )
-                    .fill(ACCENT)
-                    .min_size(egui::vec2(168.0, 42.0)),
-                )
-                .clicked()
-                && let Some(path) = rfd::FileDialog::new()
-                    .add_filter("documents", &["pdf", "png", "jpg", "jpeg", "webp"])
-                    .pick_file()
-            {
-                self.open_path(path);
-            }
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new("Or drop a file here").weak().italics());
+                    .clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .add_filter("documents", &["pdf", "png", "jpg", "jpeg", "webp"])
+                        .pick_file()
+                {
+                    self.open_path(path);
+                }
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("Or drop a file here").weak().italics());
+            });
+            ui.add_space(12.0);
+            self.show_tool_grid(ui);
+            ui.add_space(12.0);
+            self.show_recent_list(ui);
+            ui.add_space(pad);
         });
-        ui.add_space(pad);
-        self.show_tool_grid(ui);
-        ui.add_space(16.0);
-        self.show_recent_list(ui);
-        ui.add_space(pad);
         let _ = ctx;
     }
 
     fn show_tool_grid(&mut self, ui: &mut egui::Ui) {
-        let gap = 14.0;
+        let gap = 10.0;
         let avail = ui.available_width();
         let cols = if avail > 720.0 {
             4
@@ -67,10 +61,9 @@ impl DocApp {
             2
         };
         let cols = cols.clamp(2, 4);
-        let cell_w = ((avail - gap * (cols as f32 - 1.0)) / cols as f32)
-            .floor()
-            .max(120.0);
-        let cell_h = 96.0;
+        let outer_w = (avail - gap * (cols as f32 - 1.0)) / cols as f32;
+        let cell_w = (outer_w - 24.0).floor().max(100.0);
+        let cell_h = 54.0;
         let tools = home_tools();
         let mut index = 0usize;
         while index < tools.len() {
@@ -143,8 +136,18 @@ impl DocApp {
         };
         let mut dismiss = false;
         let mut open_in_app: Option<std::path::PathBuf> = None;
+        let err_bg = if self.dark_mode {
+            egui::Color32::from_rgb(76, 26, 26)
+        } else {
+            egui::Color32::from_rgb(253, 236, 236)
+        };
+        let err_fg = if self.dark_mode {
+            egui::Color32::from_rgb(255, 195, 195)
+        } else {
+            egui::Color32::from_rgb(160, 25, 25)
+        };
         let fill = if banner.error {
-            egui::Color32::from_rgb(120, 40, 40)
+            err_bg
         } else {
             ACCENT.gamma_multiply(0.15)
         };
@@ -152,18 +155,14 @@ impl DocApp {
             .fill(fill)
             .stroke(egui::Stroke::new(
                 1.0_f32,
-                if banner.error {
-                    egui::Color32::RED
-                } else {
-                    ACCENT
-                },
+                if banner.error { err_fg } else { ACCENT },
             ))
             .corner_radius(egui::CornerRadius::same(8))
             .inner_margin(egui::Margin::same(12))
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     if banner.error {
-                        ui.colored_label(egui::Color32::RED, &banner.message);
+                        ui.colored_label(err_fg, &banner.message);
                     } else {
                         ui.label(&banner.message);
                     }

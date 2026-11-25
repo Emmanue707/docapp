@@ -15,7 +15,7 @@ use crate::state::{
 };
 use crate::theme::{self, ACCENT};
 use crate::tools::{self, DocTool, ToolParams};
-use crate::viewer_util::paint_main_viewer;
+use crate::viewer_util::{TileTexMap, paint_main_viewer};
 
 const UNDO_CAP: usize = 20;
 
@@ -45,6 +45,10 @@ pub struct DocApp {
     undo: UndoStack,
     pub(crate) selection: PageSelection,
     pub(crate) viewer: Option<Viewer>,
+    pub(crate) thumb_viewer: Option<Viewer>,
+    main_textures: TileTexMap,
+    pub(crate) thumb_textures: TileTexMap,
+    needs_fit_width: bool,
     pub(crate) layout: PageLayout,
     pub(crate) viewport: Viewport,
     pub(crate) current_page: usize,
@@ -89,6 +93,10 @@ impl Default for DocApp {
             undo: UndoStack::new(UNDO_CAP),
             selection: PageSelection::default(),
             viewer: None,
+            thumb_viewer: None,
+            main_textures: TileTexMap::new(),
+            thumb_textures: TileTexMap::new(),
+            needs_fit_width: false,
             layout: PageLayout {
                 page_sizes_pt: Vec::new(),
                 gap_pt: 12.0,
@@ -193,11 +201,19 @@ impl DocApp {
         };
         let viewer = Viewer::with_runner(
             1,
-            backend,
+            Arc::clone(&backend),
             layout.clone(),
             DEFAULT_CACHE_DESKTOP,
             256,
             JobRunner::builder().workers(2).build(),
+        );
+        let thumb_viewer = Viewer::with_runner(
+            2,
+            backend,
+            layout.clone(),
+            DEFAULT_CACHE_DESKTOP / 4,
+            256,
+            JobRunner::builder().workers(1).build(),
         );
         self.pdf_bytes = Some(bytes);
         self.pdf = Some(pdf);
@@ -207,6 +223,10 @@ impl DocApp {
         self.selection.clear();
         self.layout = layout;
         self.viewer = Some(viewer);
+        self.thumb_viewer = Some(thumb_viewer);
+        self.main_textures.clear();
+        self.thumb_textures.clear();
+        self.needs_fit_width = true;
         self.viewport = fit_width(self.viewport, &self.layout);
         self.current_page = 0;
         self.search_hits.clear();
@@ -219,17 +239,18 @@ impl DocApp {
     }
 
     fn load_image(&mut self, path: PathBuf, bytes: Vec<u8>) {
-        let backend = match ImageBackend::from_bytes(&bytes, 96.0) {
-            Ok(b) => Arc::new(b),
-            Err(e) => {
-                self.result_banner = Some(ResultBanner {
-                    message: format!("{e}"),
-                    path: None,
-                    error: true,
-                });
-                return;
-            }
-        };
+        let backend: Arc<dyn docsuite_viewer::RenderBackend> =
+            match ImageBackend::from_bytes(&bytes, 96.0) {
+                Ok(b) => Arc::new(b),
+                Err(e) => {
+                    self.result_banner = Some(ResultBanner {
+                        message: format!("{e}"),
+                        path: None,
+                        error: true,
+                    });
+                    return;
+                }
+            };
         let (w, h) = RenderBackend::page_size(backend.as_ref(), 0).unwrap_or((612.0, 792.0));
         let layout = PageLayout {
             page_sizes_pt: vec![(w, h)],
@@ -237,11 +258,19 @@ impl DocApp {
         };
         let viewer = Viewer::with_runner(
             1,
-            backend,
+            Arc::clone(&backend),
             layout.clone(),
             DEFAULT_CACHE_DESKTOP,
             256,
             JobRunner::builder().workers(2).build(),
+        );
+        let thumb_viewer = Viewer::with_runner(
+            2,
+            backend,
+            layout.clone(),
+            DEFAULT_CACHE_DESKTOP / 4,
+            256,
+            JobRunner::builder().workers(1).build(),
         );
         self.pdf_bytes = None;
         self.pdf = None;
@@ -250,6 +279,10 @@ impl DocApp {
         self.undo.clear();
         self.layout = layout;
         self.viewer = Some(viewer);
+        self.thumb_viewer = Some(thumb_viewer);
+        self.main_textures.clear();
+        self.thumb_textures.clear();
+        self.needs_fit_width = true;
         self.viewport = fit_width(self.viewport, &self.layout);
         self.thumb_order = vec![1];
         self.home_active = false;
@@ -487,7 +520,8 @@ impl eframe::App for DocApp {
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Theme").clicked() {
+                    let theme_label = if self.dark_mode { "Light" } else { "Dark" };
+                    if ui.button(theme_label).clicked() {
                         self.toggle_theme(ctx);
                     }
                     if self.viewer.is_some() {
@@ -549,7 +583,9 @@ impl eframe::App for DocApp {
 
         if self.home_active || self.viewer.is_none() {
             egui::CentralPanel::default()
-                .frame(egui::Frame::new().inner_margin(egui::Margin::same(20)))
+                .frame(
+                    egui::Frame::central_panel(&ctx.style()).inner_margin(egui::Margin::same(20)),
+                )
                 .show(ctx, |ui| {
                     self.show_result_banner(ui);
                     self.show_home(ctx, ui);
@@ -601,7 +637,7 @@ impl eframe::App for DocApp {
 
         if self.screenshot_path.is_some() {
             self.screenshot_frames = self.screenshot_frames.saturating_add(1);
-            if self.screenshot_frames >= 2
+            if self.screenshot_frames >= 12
                 && let Some(path) = self.screenshot_path.take()
             {
                 match crate::screenshot::write_cpu_png(ctx, &path) {
@@ -623,6 +659,10 @@ impl DocApp {
         let rect = ui.max_rect();
         self.viewport.width_px = rect.width();
         self.viewport.height_px = rect.height();
+        if self.needs_fit_width {
+            self.viewport = fit_width(self.viewport, &self.layout);
+            self.needs_fit_width = false;
+        }
         let resp = ui.allocate_rect(rect, egui::Sense::click_and_drag());
         let scroll = ui.input(|i| i.raw_scroll_delta.y + i.smooth_scroll_delta.y);
         if scroll != 0.0 {
@@ -728,7 +768,16 @@ impl DocApp {
         }
         if let Some(viewer) = self.viewer.as_mut() {
             let painter = ui.painter_at(rect);
-            paint_main_viewer(ctx, viewer, &self.viewport, &self.layout, rect, &painter);
+            paint_main_viewer(
+                ctx,
+                viewer,
+                &mut self.main_textures,
+                1,
+                &self.viewport,
+                &self.layout,
+                rect,
+                &painter,
+            );
             for (start, end, page) in [self.crop_drag, self.signature_drag].into_iter().flatten() {
                 let idx = page.saturating_sub(1) as usize;
                 let (sx, sy, _, _) =

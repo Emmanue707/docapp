@@ -92,10 +92,10 @@ fn rasterize_tri(
         x: v2.pos.x * ppp,
         y: v2.pos.y * ppp,
     };
-    let min_x = p0.x.min(p1.x).min(p2.x).max(clip.min.x * ppp).floor() as i32;
-    let max_x = p0.x.max(p1.x).max(p2.x).min(clip.max.x * ppp).ceil() as i32;
-    let min_y = p0.y.min(p1.y).min(p2.y).max(clip.min.y * ppp).floor() as i32;
-    let max_y = p0.y.max(p1.y).max(p2.y).min(clip.max.y * ppp).ceil() as i32;
+    let min_x = p0.x.min(p1.x).min(p2.x).max(clip.min.x).floor() as i32;
+    let max_x = p0.x.max(p1.x).max(p2.x).min(clip.max.x).ceil() as i32;
+    let min_y = p0.y.min(p1.y).min(p2.y).max(clip.min.y).floor() as i32;
+    let max_y = p0.y.max(p1.y).max(p2.y).min(clip.max.y).ceil() as i32;
     if min_x >= max_x || min_y >= max_y {
         return;
     }
@@ -128,7 +128,7 @@ fn rasterize_tri(
             );
             let mut color = lerp_color(v0.color, v1.color, v2.color, w0, w1, w2);
             if let Some(font) = font_image {
-                let cov = sample_font(font, uv.x, uv.y);
+                let cov = sample_font(font, uv.x, uv.y).powf(0.55);
                 let a = (cov * color.a() as f32) as u8;
                 color = Color32::from_rgba_premultiplied(
                     ((color.r() as f32) * cov) as u8,

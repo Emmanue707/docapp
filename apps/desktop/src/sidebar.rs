@@ -2,7 +2,7 @@ use eframe::egui;
 
 use crate::app::DocApp;
 use crate::theme::ACCENT;
-use crate::viewer_util::{paint_tiles_in_rect, thumb_viewport_for_page};
+use crate::viewer_util::{paint_page_thumb, thumb_strip_viewport};
 
 impl DocApp {
     pub(crate) fn show_page_sidebar(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -14,6 +14,11 @@ impl DocApp {
         }
         if self.thumb_order.len() != page_count {
             self.thumb_order = (1..=page_count as u32).collect();
+        }
+        let strip_vp = thumb_strip_viewport(&self.layout, 94.0);
+        if let Some(tv) = self.thumb_viewer.as_mut() {
+            tv.update(strip_vp);
+            let _ = tv.poll_ready();
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
             let mut i = 0usize;
@@ -44,15 +49,19 @@ impl DocApp {
                             egui::vec2(94.0, thumb_h),
                             egui::Sense::click_and_drag(),
                         );
-                        if let Some(viewer) = self.viewer.as_mut() {
-                            let vp = thumb_viewport_for_page(
+                        if let Some(tv) = self.thumb_viewer.as_mut() {
+                            let painter = ui.painter_at(rect);
+                            paint_page_thumb(
+                                ctx,
+                                tv,
+                                &mut self.thumb_textures,
+                                2,
+                                strip_vp,
                                 &self.layout,
                                 page_idx,
-                                rect.width(),
-                                thumb_h,
+                                rect,
+                                &painter,
                             );
-                            let painter = ui.painter_at(rect);
-                            paint_tiles_in_rect(ctx, viewer, vp, &self.layout, rect, &painter);
                         }
                         ui.label(format!("Page {page}"));
                         resp
@@ -74,15 +83,19 @@ impl DocApp {
                         self.selection
                             .apply_reorder_drag(from, i, &mut self.thumb_order);
                     }
-                    if ui.small_button("↑").clicked() && i > 0 {
-                        self.selection
-                            .apply_reorder_drag(i, i - 1, &mut self.thumb_order);
-                    }
-                    if ui.small_button("↓").clicked() && i + 1 < self.thumb_order.len() {
-                        self.selection
-                            .apply_reorder_drag(i, i + 1, &mut self.thumb_order);
-                    }
-                    let _ = inner;
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        if arrow_button(ui, true, i > 0).clicked() && i > 0 {
+                            self.selection
+                                .apply_reorder_drag(i, i - 1, &mut self.thumb_order);
+                        }
+                        if arrow_button(ui, false, i + 1 < self.thumb_order.len()).clicked()
+                            && i + 1 < self.thumb_order.len()
+                        {
+                            self.selection
+                                .apply_reorder_drag(i, i + 1, &mut self.thumb_order);
+                        }
+                    });
                 });
                 i += 1;
             }
@@ -113,4 +126,46 @@ impl DocApp {
         self.viewport = docsuite_viewer::fit_page(self.viewport, &self.layout, idx);
         self.current_page = idx;
     }
+}
+
+fn arrow_button(ui: &mut egui::Ui, up: bool, enabled: bool) -> egui::Response {
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), sense);
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&resp);
+        let fill = if enabled {
+            visuals.bg_fill
+        } else {
+            ui.style().visuals.widgets.noninteractive.bg_fill
+        };
+        ui.painter()
+            .rect(rect, 4.0, fill, visuals.bg_stroke, egui::StrokeKind::Inside);
+        let c = rect.center();
+        let color = if enabled {
+            visuals.text_color()
+        } else {
+            ui.style().visuals.weak_text_color()
+        };
+        let d = 4.0;
+        let pts = if up {
+            vec![
+                egui::pos2(c.x, c.y - d),
+                egui::pos2(c.x + d, c.y + d * 0.7),
+                egui::pos2(c.x - d, c.y + d * 0.7),
+            ]
+        } else {
+            vec![
+                egui::pos2(c.x - d, c.y - d * 0.7),
+                egui::pos2(c.x + d, c.y - d * 0.7),
+                egui::pos2(c.x, c.y + d),
+            ]
+        };
+        ui.painter()
+            .add(egui::Shape::convex_polygon(pts, color, egui::Stroke::NONE));
+    }
+    resp
 }
