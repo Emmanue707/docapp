@@ -5,9 +5,7 @@ use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, GenericImageView};
 
 use crate::matrix::Matrix;
-use crate::types::{
-    ExtractedPage, ImageKind, PathSegment, PlacedImage, TextRun, VectorPath,
-};
+use crate::types::{ExtractedPage, ImageKind, PathSegment, PlacedImage, TextRun, VectorPath};
 
 pub fn normalize_rotate(rotate: i32) -> i32 {
     rotate.rem_euclid(360)
