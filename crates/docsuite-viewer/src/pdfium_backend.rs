@@ -107,9 +107,7 @@ mod imp {
                 .ok_or_else(|| Error::InvalidInput("page".to_owned()))?;
             let tw = tile_rect_px.width.round().max(1.0) as i32;
             let th = tile_rect_px.height.round().max(1.0) as i32;
-            let x0_pt = tile_rect_px.x / zoom;
-            let y_top_pt = tile_rect_px.y / zoom;
-            let y0_pt = h_pt - y_top_pt - tile_rect_px.height / zoom;
+            let _ = h_pt;
             cancel.check()?;
             self.with_document(|document| {
                 let page = document
@@ -121,7 +119,10 @@ mod imp {
                     .set_fixed_height(th)
                     .scale(zoom, zoom)
                     .map_err(|e| Error::Backend(e.to_string()))?
-                    .translate(PdfPoints::new(-x0_pt), PdfPoints::new(-y0_pt))
+                    .translate(
+                        PdfPoints::new(-tile_rect_px.x),
+                        PdfPoints::new(-tile_rect_px.y),
+                    )
                     .map_err(|e| Error::Backend(e.to_string()))?;
                 cancel.check()?;
                 let bitmap = page
@@ -175,14 +176,24 @@ mod imp {
         pub fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
             bind_pdfium()?;
             let (tx, rx) = std::sync::mpsc::sync_channel::<WorkerMsg>(64);
+            let (init_tx, init_rx) = std::sync::mpsc::sync_channel::<Result<()>>(1);
             let init = bytes;
             let join = thread::spawn(move || {
                 let mut worker = match PdfiumWorker::open(init) {
-                    Ok(w) => w,
-                    Err(_) => return,
+                    Ok(w) => {
+                        let _ = init_tx.send(Ok(()));
+                        w
+                    }
+                    Err(e) => {
+                        let _ = init_tx.send(Err(e));
+                        return;
+                    }
                 };
                 worker_loop(&mut worker, rx);
             });
+            init_rx
+                .recv()
+                .map_err(|_| Error::Backend("pdfium worker failed to start".to_owned()))??;
             Ok(Self {
                 tx,
                 join: Mutex::new(Some(join)),

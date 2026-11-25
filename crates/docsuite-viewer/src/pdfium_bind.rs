@@ -17,8 +17,12 @@ pub(crate) mod imp {
                 return bind_at(&path);
             }
         }
-        if let Ok(dir) = env::var("DOCAPP_PDFIUM") {
-            let path = PathBuf::from(dir).join(&name);
+        if let Ok(val) = env::var("DOCAPP_PDFIUM") {
+            let p = PathBuf::from(&val);
+            if p.is_file() {
+                return bind_at(&p);
+            }
+            let path = p.join(&name);
             if path.is_file() {
                 return bind_at(&path);
             }

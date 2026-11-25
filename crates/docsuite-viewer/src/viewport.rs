@@ -180,17 +180,18 @@ pub fn visible_tile_keys(
         let ts = tile_size as f32;
         let cols = ((page_w_px / ts).ceil() as i32).max(1);
         let rows = ((page_h_px / ts).ceil() as i32).max(1);
-        let vis_left = (vp.offset_x - sx).max(0.0);
-        let vis_top = (vp.offset_y - sy).max(0.0);
-        let vis_right = (vp.offset_x + vp.width_px - sx).min(sw);
-        let vis_bottom = (vp.offset_y + vp.height_px - sy).min(sh);
+        let vis_left = (-sx).max(0.0);
+        let vis_top = (-sy).max(0.0);
+        let vis_right = (vp.width_px - sx).min(sw);
+        let vis_bottom = (vp.height_px - sy).min(sh);
         if vis_right <= vis_left || vis_bottom <= vis_top {
             continue;
         }
-        let tx0 = (vis_left / ts).floor() as i32;
-        let ty0 = (vis_top / ts).floor() as i32;
-        let tx1 = ((vis_right / ts).ceil() as i32).min(cols);
-        let ty1 = ((vis_bottom / ts).ceil() as i32).min(rows);
+        let to_bucket = bucket_scale / vp.scale.max(1e-6);
+        let tx0 = ((vis_left * to_bucket) / ts).floor() as i32;
+        let ty0 = ((vis_top * to_bucket) / ts).floor() as i32;
+        let tx1 = (((vis_right * to_bucket) / ts).ceil() as i32).min(cols);
+        let ty1 = (((vis_bottom * to_bucket) / ts).ceil() as i32).min(rows);
         for ty in ty0..ty1 {
             for tx in tx0..tx1 {
                 keys.push(TileKey {
@@ -345,6 +346,21 @@ mod tests {
             keys.iter()
                 .all(|k| k.zoom_bucket == zoom_bucket_for_scale(vp.scale))
         );
+    }
+
+    #[test]
+    fn visible_tiles_when_scrolled_uses_bucket_coords() {
+        let layout = sample_layout();
+        let vp = Viewport {
+            width_px: 512.0,
+            height_px: 512.0,
+            scale: 1.5,
+            offset_x: 0.0,
+            offset_y: 1300.0,
+            dpi: 72.0,
+        };
+        let keys = visible_tile_keys(1, vp, &layout, 256);
+        assert!(keys.iter().any(|k| k.page == 1 && k.ty == 0));
     }
 
     #[test]
