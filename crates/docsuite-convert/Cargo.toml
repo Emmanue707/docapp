@@ -17,7 +17,7 @@ docsuite-ocr = { path = "../docsuite-ocr" }
 docsuite-pdf = { path = "../docsuite-pdf" }
 image = { workspace = true }
 lopdf = { workspace = true }
-pdfium-render = { version = "0.8", default-features = false, features = ["pdfium_latest", "image"], optional = true }
+pdfium-render = { version = "0.8", default-features = false, features = ["pdfium_7543", "image"], optional = true }
 quick-xml = { workspace = true }
 serde = { workspace = true, optional = true, features = ["std"] }
 serde_json = { workspace = true, optional = true }
