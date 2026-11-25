@@ -6,6 +6,7 @@ mod icon;
 mod modal;
 mod parse_util;
 mod recent;
+mod screenshot;
 mod sidebar;
 mod state;
 mod theme;
@@ -22,21 +23,30 @@ fn main() -> eframe::Result<()> {
             .with_title("Waghitech Docapp")
             .with_inner_size([1100.0, 720.0])
             .with_icon(icon),
+        renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
     eframe::run_native(
         "Waghitech Docapp",
         options,
         Box::new(|cc| {
-            let dark = cc.egui_ctx.style().visuals.dark_mode;
-            if std::env::var("DOCAPP_DARK").ok().as_deref() == Some("1") {
-                theme::apply_visuals(&cc.egui_ctx, true);
-            } else if std::env::var("DOCAPP_DARK").ok().as_deref() == Some("0") {
-                theme::apply_visuals(&cc.egui_ctx, false);
-            } else {
-                theme::apply_visuals(&cc.egui_ctx, dark);
+            let dark = match std::env::var("DOCAPP_DARK").ok().as_deref() {
+                Some("1") => true,
+                Some("0") => false,
+                _ => false,
+            };
+            theme::apply_visuals(&cc.egui_ctx, dark);
+            let mut app = DocApp::default();
+            app.dark_mode = dark;
+            if let Ok(p) = std::env::var("DOCAPP_OPEN") {
+                app.open_path(std::path::PathBuf::from(p));
             }
-            Ok(Box::new(DocApp::default()))
+            if let Ok(p) = std::env::var("DOCAPP_SCREENSHOT")
+                && p.ends_with(".png")
+            {
+                app.screenshot_path = Some(std::path::PathBuf::from(p));
+            }
+            Ok(Box::new(app))
         }),
     )
 }

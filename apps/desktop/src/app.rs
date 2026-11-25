@@ -67,6 +67,8 @@ pub struct DocApp {
     home_active: bool,
     pending_drop_tool: Option<DocTool>,
     pending_tool_result: Option<PathBuf>,
+    pub(crate) screenshot_path: Option<PathBuf>,
+    screenshot_frames: u32,
 }
 
 impl Default for DocApp {
@@ -119,6 +121,8 @@ impl Default for DocApp {
             home_active: true,
             pending_drop_tool: None,
             pending_tool_result: None,
+            screenshot_path: None,
+            screenshot_frames: 0,
         }
     }
 }
@@ -420,7 +424,7 @@ impl DocApp {
         }
     }
 
-    fn toggle_theme(&mut self, ctx: &egui::Context) {
+    pub(crate) fn toggle_theme(&mut self, ctx: &egui::Context) {
         self.dark_mode = !self.dark_mode;
         theme::apply_visuals(ctx, self.dark_mode);
     }
@@ -590,6 +594,21 @@ impl eframe::App for DocApp {
                         self.pending_drop_tool = None;
                     } else {
                         self.open_path(path);
+                    }
+                }
+            }
+        }
+
+        if self.screenshot_path.is_some() {
+            self.screenshot_frames = self.screenshot_frames.saturating_add(1);
+            if self.screenshot_frames >= 2
+                && let Some(path) = self.screenshot_path.take()
+            {
+                match crate::screenshot::write_cpu_png(ctx, &path) {
+                    Ok(()) => std::process::exit(0),
+                    Err(e) => {
+                        eprintln!("screenshot: {e}");
+                        std::process::exit(1);
                     }
                 }
             }
